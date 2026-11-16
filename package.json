@@ -1,0 +1,25 @@
+{
+  "name": "raktsetu",
+  "version": "1.0.0",
+  "description": "AI-Powered Blood Inventory & Donor Coordination Platform",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "test": "node server/test.js"
+  },
+  "keywords": [
+    "blood-bank",
+    "donor-coordination",
+    "ai-forecasting",
+    "healthcare-technology"
+  ],
+  "author": "RaktSetu Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "xlsx": "^0.18.5"
+  }
+}
