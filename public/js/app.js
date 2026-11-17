@@ -264,9 +264,6 @@ function renderLandingPage() {
             <button class="btn btn-secondary btn-lg" style="color:var(--primary-red); border-color:var(--primary-red);" onclick="openDonorRegisterModal()">
               ${Icons.bloodDrop(18)} Register as a Donor
             </button>
-            <button class="btn btn-secondary btn-lg" onclick="navigateTo('track-status')">
-              ${Icons.activity(18)} Track Application
-            </button>
           </div>
           <div style="margin-top:20px; font-size:12px; color:var(--text-light); display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
             <span>✓ Verified Hospital Approval</span>
