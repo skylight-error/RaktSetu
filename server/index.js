@@ -42,19 +42,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// Start server if run directly
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`=======================================================`);
-    console.log(`  🩸 RAKTSETU — AI BLOOD INVENTORY & DONOR PLATFORM  `);
-    console.log(`  Every Drop Matters. Every Connection Saves Lives.  `);
-    console.log(`=======================================================`);
-    console.log(`  ✓ Server running on: http://localhost:${PORT}`);
-    console.log(`  ✓ SQLite Database initialized & pre-seeded`);
-    console.log(`  ✓ AI Demand Forecasting Model ready`);
-    console.log(`  ✓ Intelligent Donor Matching Engine active`);
-    console.log(`=======================================================`);
-  });
-}
+// Start server
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`=======================================================`);
+  console.log(`  🩸 RAKTSETU — AI BLOOD INVENTORY & DONOR PLATFORM  `);
+  console.log(`  Every Drop Matters. Every Connection Saves Lives.  `);
+  console.log(`=======================================================`);
+  console.log(`  ✓ Server running on: http://localhost:${PORT}`);
+  console.log(`  ✓ SQLite Database initialized & pre-seeded`);
+  console.log(`  ✓ AI Demand Forecasting Model ready`);
+  console.log(`  ✓ Intelligent Donor Matching Engine active`);
+  console.log(`=======================================================`);
+});
+
+// Keep process active
+setInterval(() => {}, 1000 * 60 * 60);
 
 module.exports = app;
