@@ -1,4 +1,138 @@
 const { db, initSchema } = require('./database');
+const { hashPassword } = require('../utils/crypto');
+
+function ensureApplicationsAndAccounts() {
+  // 1. Upgrade hospitals with secure password hashes
+  const hospitals = db.prepare('SELECT id, password_hash, password_salt FROM hospitals').all();
+  hospitals.forEach(h => {
+    if (!h.password_salt || h.password_hash === 'hospital123') {
+      const { hash, salt } = hashPassword('hospital123');
+      db.prepare('UPDATE hospitals SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, h.id);
+    }
+  });
+
+  // 2. Ensure pre-existing donors have donor_applications and donor_accounts
+  const allDonors = db.prepare('SELECT * FROM donors').all();
+  for (const d of allDonors) {
+    let app = db.prepare('SELECT id FROM donor_applications WHERE mobile = ?').get(d.mobile);
+
+    if (!app) {
+      const appId = `RS-APP-20261117-${1000 + d.id}`;
+      const res = db.prepare(`
+        INSERT INTO donor_applications (
+          application_id, full_name, dob, age, gender, mobile, email, blood_group,
+          address, city, pincode, preferred_hospital_id, status, reviewed_by_hospital_id,
+          reviewed_by_staff_name, reviewed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', 1, 'Chief Medical Officer', datetime('now', '-30 days'))
+      `).run(
+        appId, d.full_name, d.dob, d.age, d.gender, d.mobile, d.email, d.blood_group,
+        d.address, d.city, d.pincode, d.preferred_hospital_id || 1
+      );
+      app = { id: res.lastInsertRowid };
+    }
+
+    const medScreening = (d.screening_status === 'APPROVED')
+      ? 'MEDICALLY_APPROVED'
+      : (d.screening_status === 'TEMPORARILY DEFERRED')
+        ? 'TEMPORARILY_DEFERRED'
+        : (d.screening_status === 'NOT APPROVED')
+          ? 'NOT_APPROVED'
+          : (d.screening_status === 'APPOINTMENT SCHEDULED')
+            ? 'APPOINTMENT_SCHEDULED'
+            : 'PENDING_SCREENING';
+
+    db.prepare(`
+      UPDATE donors
+      SET application_id = ?,
+          registration_status = 'APPROVED',
+          account_status = 'ACTIVE',
+          medical_screening_status = ?
+      WHERE id = ?
+    `).run(app.id, medScreening, d.id);
+
+    // Ensure donor_account exists with password 'donor123'
+    const acc = db.prepare('SELECT id FROM donor_accounts WHERE donor_id = ?').get(d.id);
+    if (!acc) {
+      const { hash, salt } = hashPassword('donor123');
+      db.prepare(`
+        INSERT INTO donor_accounts (application_id, donor_id, email, mobile, password_hash, password_salt, account_status)
+        VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')
+      `).run(app.id, d.id, d.email, d.mobile, hash, salt);
+    }
+  }
+
+  // 3. Ensure dedicated demo applications exist for testing approval/activation/rejection
+  const demoApps = [
+    {
+      appId: 'DEMO-APP-PENDING',
+      name: 'Vikram Joshi',
+      dob: '1995-08-14',
+      age: 31,
+      gender: 'Male',
+      mobile: '+91 98111 22233',
+      email: 'vikram.joshi@example.com',
+      bg: 'O+',
+      address: 'Plot 18, Hindu Colony, Dadar East',
+      city: 'Mumbai',
+      pincode: '400014',
+      hId: 1,
+      status: 'PENDING_APPROVAL',
+      otp: '456789'
+    },
+    {
+      appId: 'DEMO-APP-APPROVED',
+      name: 'Divya Nair',
+      dob: '1999-04-22',
+      age: 27,
+      gender: 'Female',
+      mobile: '+91 98111 44455',
+      email: 'divya.nair@example.com',
+      bg: 'A-',
+      address: 'B-302, Sea Breeze, Worli Sea Face',
+      city: 'Mumbai',
+      pincode: '400018',
+      hId: 1,
+      status: 'APPROVED',
+      otp: '123456'
+    },
+    {
+      appId: 'DEMO-APP-REJECTED',
+      name: 'Karan Singhal',
+      dob: '1993-12-05',
+      age: 33,
+      gender: 'Male',
+      mobile: '+91 98111 66677',
+      email: 'karan.s@example.com',
+      bg: 'B+',
+      address: 'Near Old Toll Naka, Thane West',
+      city: 'Thane',
+      pincode: '400601',
+      hId: 1,
+      status: 'REJECTED',
+      rejectionReason: 'Address location outside service radius and primary mobile verification failed.'
+    }
+  ];
+
+  demoApps.forEach(a => {
+    const exists = db.prepare('SELECT id FROM donor_applications WHERE application_id = ?').get(a.appId);
+    if (!exists) {
+      db.prepare(`
+        INSERT INTO donor_applications (
+          application_id, full_name, dob, age, gender, mobile, email, blood_group,
+          address, city, pincode, preferred_hospital_id, status, reviewed_by_hospital_id,
+          reviewed_by_staff_name, reviewed_at, rejection_reason, activation_otp, activation_otp_expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '-1 day'), ?, ?, datetime('now', '+7 days'))
+      `).run(
+        a.appId, a.name, a.dob, a.age, a.gender, a.mobile, a.email, a.bg,
+        a.address, a.city, a.pincode, a.hId, a.status,
+        a.status !== 'PENDING_APPROVAL' ? 1 : null,
+        a.status !== 'PENDING_APPROVAL' ? 'Dr. Rajiv Mehta (Chief Transfusion Officer)' : null,
+        a.rejectionReason || null,
+        a.otp || null
+      );
+    }
+  });
+}
 
 function seedDatabase() {
   initSchema();
@@ -6,7 +140,8 @@ function seedDatabase() {
   // Check if already seeded
   const hospitalCount = db.prepare('SELECT COUNT(*) as count FROM hospitals').get().count;
   if (hospitalCount > 0) {
-    console.log('Database already initialized with seed data.');
+    ensureApplicationsAndAccounts();
+    console.log('Database already initialized with seed data (auth & applications verified).');
     return;
   }
 
@@ -14,10 +149,11 @@ function seedDatabase() {
 
   // 1. Seed Hospitals
   const insertHospital = db.prepare(`
-    INSERT INTO hospitals (id, name, email, phone, address, city, pincode, latitude, longitude, password_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO hospitals (id, name, email, phone, address, city, pincode, latitude, longitude, password_hash, password_salt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const hosp1Pass = hashPassword('hospital123');
   insertHospital.run(
     1,
     'Metro General Hospital & Trauma Centre',
@@ -28,9 +164,11 @@ function seedDatabase() {
     '400012',
     18.9986,
     72.8385,
-    'hospital123'
+    hosp1Pass.hash,
+    hosp1Pass.salt
   );
 
+  const hosp2Pass = hashPassword('hospital123');
   insertHospital.run(
     2,
     'City Life Charitable Blood Bank & Research Institute',
@@ -41,7 +179,8 @@ function seedDatabase() {
     '400058',
     19.1197,
     72.8468,
-    'hospital123'
+    hosp2Pass.hash,
+    hosp2Pass.salt
   );
 
   // 2. Seed Donors (26 realistic donors with diverse blood groups, screening, locations)
@@ -235,15 +374,25 @@ function seedDatabase() {
       full_name, dob, age, gender, mobile, email, blood_group, address, city, pincode,
       preferred_hospital_id, screening_status, screening_valid_until, last_donation_date,
       next_eligible_date, weekly_availability, weekly_availability_updated_at,
-      latitude, longitude, consent_contact, source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '-2 days'), ?, ?, 1, 'SEED_DEMO')
+      latitude, longitude, consent_contact, source, registration_status, account_status, medical_screening_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '-2 days'), ?, ?, 1, 'SEED_DEMO', 'APPROVED', 'ACTIVE', ?)
   `);
 
   donors.forEach(d => {
+    const medScreening = (d.screening_status === 'APPROVED')
+      ? 'MEDICALLY_APPROVED'
+      : (d.screening_status === 'TEMPORARILY DEFERRED')
+        ? 'TEMPORARILY_DEFERRED'
+        : (d.screening_status === 'NOT APPROVED')
+          ? 'NOT_APPROVED'
+          : (d.screening_status === 'APPOINTMENT SCHEDULED')
+            ? 'APPOINTMENT_SCHEDULED'
+            : 'PENDING_SCREENING';
+
     insertDonor.run(
       d.name, d.dob, d.age, d.gender, d.mobile, d.email, d.blood_group, d.address, d.city, d.pincode,
       d.preferred_hospital_id, d.screening_status, d.screening_valid_until, d.last_donation_date,
-      d.next_eligible_date, d.weekly_availability, d.lat, d.lng
+      d.next_eligible_date, d.weekly_availability, d.lat, d.lng, medScreening
     );
   });
 
@@ -252,11 +401,8 @@ function seedDatabase() {
     INSERT INTO appointments (donor_id, hospital_id, appointment_date, appointment_time, status, instructions)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
-  // Sneha Deshmukh scheduled appointment
   insertAppointment.run(4, 1, '2026-11-20', '10:30 AM', 'SCHEDULED', 'Please carry photo ID and fast for 2 hours prior to hemoglobin test.');
-  // Rohan Kulkarni
   insertAppointment.run(5, 1, '2026-11-22', '02:00 PM', 'SCHEDULED', 'Medical history questionnaire and blood pressure check.');
-  // Simran Kaur
   insertAppointment.run(19, 2, '2026-11-21', '11:00 AM', 'SCHEDULED', 'Routine pre-donation donor screening appointment.');
 
   // 4. Seed Screening Records for approved donors
@@ -270,41 +416,28 @@ function seedDatabase() {
   insertScreening.run(20, 2, 'Dr. Anand Kulkarni', '2026-02-10', 'NOT APPROVED', 'Chronic severe hypertension unmanaged. Donor advised clinical treatment.', null);
 
   // 5. Seed Blood Inventory (Hospital 1 & Hospital 2)
-  // Components: Whole Blood (35 days expiry), PRBC (42 days), Platelets (5 days), Plasma (365 days)
   const insertInventory = db.prepare(`
     INSERT INTO inventory (hospital_id, blood_group, component, unit_code, quantity_units, collection_date, expiry_date, storage_location, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const inventoryItems = [
-    // Usable fresh units
     { hId: 1, bg: 'O+', comp: 'Packed Red Blood Cells (PRBC)', code: 'PRBC-2026-1042', qty: 6, col: '2026-11-05', exp: '2026-12-17', loc: 'Refrigerator B1 (Shelf 2)', status: 'USABLE' },
     { hId: 1, bg: 'O-', comp: 'Packed Red Blood Cells (PRBC)', code: 'PRBC-2026-1043', qty: 2, col: '2026-11-08', exp: '2026-12-20', loc: 'Refrigerator B1 (Shelf 1 - Emergency)', status: 'USABLE' },
     { hId: 1, bg: 'A+', comp: 'Packed Red Blood Cells (PRBC)', code: 'PRBC-2026-1044', qty: 8, col: '2026-11-02', exp: '2026-12-14', loc: 'Refrigerator B2 (Shelf 1)', status: 'USABLE' },
     { hId: 1, bg: 'B+', comp: 'Packed Red Blood Cells (PRBC)', code: 'PRBC-2026-1045', qty: 7, col: '2026-11-04', exp: '2026-12-16', loc: 'Refrigerator B2 (Shelf 3)', status: 'USABLE' },
     { hId: 1, bg: 'AB+', comp: 'Packed Red Blood Cells (PRBC)', code: 'PRBC-2026-1046', qty: 4, col: '2026-11-06', exp: '2026-12-18', loc: 'Refrigerator B3 (Shelf 1)', status: 'USABLE' },
-
-    // Platelets (critical 5-day shelf life!)
     { hId: 1, bg: 'O+', comp: 'Platelets', code: 'PLT-2026-8801', qty: 3, col: '2026-11-14', exp: '2026-11-19', loc: 'Agitator Unit 1 (Temp 22°C)', status: 'USABLE' },
     { hId: 1, bg: 'A+', comp: 'Platelets', code: 'PLT-2026-8802', qty: 2, col: '2026-11-15', exp: '2026-11-20', loc: 'Agitator Unit 1 (Temp 22°C)', status: 'USABLE' },
-    // Near-expiry Platelets!
     { hId: 1, bg: 'B+', comp: 'Platelets', code: 'PLT-2026-8799', qty: 1, col: '2026-11-12', exp: '2026-11-17', loc: 'Agitator Unit 2 (Near Expiry Rack)', status: 'NEAR_EXPIRY' },
-    // Expired Platelet unit (should NOT be counted in usable inventory!)
     { hId: 1, bg: 'O-', comp: 'Platelets', code: 'PLT-2026-8790', qty: 1, col: '2026-11-10', exp: '2026-11-15', loc: 'Quarantine Box Q-1 (Disposal)', status: 'EXPIRED' },
-
-    // Whole Blood
     { hId: 1, bg: 'O+', comp: 'Whole Blood', code: 'WB-2026-3021', qty: 5, col: '2026-10-30', exp: '2026-12-04', loc: 'Refrigerator A1 (Shelf 1)', status: 'USABLE' },
     { hId: 1, bg: 'A-', comp: 'Whole Blood', code: 'WB-2026-3022', qty: 2, col: '2026-11-01', exp: '2026-12-06', loc: 'Refrigerator A1 (Shelf 2)', status: 'USABLE' },
     { hId: 1, bg: 'B-', comp: 'Whole Blood', code: 'WB-2026-3023', qty: 1, col: '2026-10-25', exp: '2026-11-29', loc: 'Refrigerator A2 (Shelf 1)', status: 'USABLE' },
-    // Near-expiry Whole Blood
     { hId: 1, bg: 'AB-', comp: 'Whole Blood', code: 'WB-2026-2990', qty: 1, col: '2026-10-14', exp: '2026-11-18', loc: 'Refrigerator A2 (Shelf 3 - Urgent Issue)', status: 'NEAR_EXPIRY' },
-
-    // Fresh Frozen Plasma (FFP - 365 days shelf life)
     { hId: 1, bg: 'AB+', comp: 'Plasma', code: 'FFP-2026-5511', qty: 10, col: '2026-08-10', exp: '2027-08-10', loc: 'Deep Freezer F1 (-30°C)', status: 'USABLE' },
     { hId: 1, bg: 'O+', comp: 'Plasma', code: 'FFP-2026-5512', qty: 12, col: '2026-09-01', exp: '2027-09-01', loc: 'Deep Freezer F1 (-30°C)', status: 'USABLE' },
     { hId: 1, bg: 'A+', comp: 'Plasma', code: 'FFP-2026-5513', qty: 9, col: '2026-07-20', exp: '2027-07-20', loc: 'Deep Freezer F2 (-30°C)', status: 'USABLE' },
-
-    // Hospital 2 stock
     { hId: 2, bg: 'O+', comp: 'Packed Red Blood Cells (PRBC)', code: 'CL-PRBC-041', qty: 5, col: '2026-11-04', exp: '2026-12-16', loc: 'Unit North Shelf 1', status: 'USABLE' },
     { hId: 2, bg: 'O-', comp: 'Packed Red Blood Cells (PRBC)', code: 'CL-PRBC-042', qty: 1, col: '2026-11-09', exp: '2026-12-21', loc: 'Emergency Tray 1', status: 'USABLE' },
     { hId: 2, bg: 'Platelets', comp: 'Platelets', code: 'CL-PLT-109', qty: 2, col: '2026-11-14', exp: '2026-11-19', loc: 'Room 2 Agitator', status: 'USABLE' }
@@ -320,50 +453,17 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertRequest.run(
-    1,
-    1,
-    'O-',
-    'Packed Red Blood Cells (PRBC)',
-    2,
-    'CRITICAL',
-    '2026-11-17 14:00',
-    'MATCHING IN PROGRESS',
-    'Trauma patient in ICU after acute vehicle collision. Emergency transfusion required.'
-  );
-
-  insertRequest.run(
-    2,
-    1,
-    'B+',
-    'Platelets',
-    3,
-    'URGENT',
-    '2026-11-18 10:00',
-    'DONORS CONTACTED',
-    'Oncology ward patient with thrombocytopenia undergoing chemotherapy.'
-  );
-
-  insertRequest.run(
-    3,
-    1,
-    'A+',
-    'Whole Blood',
-    2,
-    'ROUTINE',
-    '2026-11-21 09:00',
-    'NEW',
-    'Elective orthopedic surgery scheduled for Thursday morning.'
-  );
+  insertRequest.run(1, 1, 'O-', 'Packed Red Blood Cells (PRBC)', 2, 'CRITICAL', '2026-11-17 14:00', 'MATCHING IN PROGRESS', 'Trauma patient in ICU after acute vehicle collision.');
+  insertRequest.run(2, 1, 'B+', 'Platelets', 3, 'URGENT', '2026-11-18 10:00', 'DONORS CONTACTED', 'Oncology ward patient with thrombocytopenia.');
+  insertRequest.run(3, 1, 'A+', 'Whole Blood', 2, 'ROUTINE', '2026-11-21 09:00', 'NEW', 'Elective orthopedic surgery scheduled for Thursday morning.');
 
   // 7. Seed Contact record for request #2
-  const insertContact = db.prepare(`
+  db.prepare(`
     INSERT INTO donor_contact_records (request_id, donor_id, hospital_id, contacted_at, contact_method, response_status, notes)
-    VALUES (?, ?, ?, datetime('now', '-3 hours'), 'IN_APP_SIMULATION', 'CONTACTED', 'Automated urgent mobilisation alert sent to verified nearby donor.')
-  `);
-  insertContact.run(2, 11, 1); // Tanvi Shinde
+    VALUES (2, 11, 1, datetime('now', '-3 hours'), 'IN_APP_SIMULATION', 'CONTACTED', 'Automated urgent alert sent to verified nearby donor.')
+  `).run();
 
-  // 8. Seed Weekly Availability Notifications
+  // 8. Seed Notifications
   const insertNotification = db.prepare(`
     INSERT INTO notifications (donor_id, title, message, type, is_read, created_at)
     VALUES (?, ?, ?, ?, ?, datetime('now', '-1 day'))
@@ -379,52 +479,31 @@ function seedDatabase() {
     );
   }
 
-  // 9. Generate Historical Demand Data (6 months of daily data for ML forecasting)
+  // 9. Generate Historical Demand Data (180 days)
   console.log('Generating 180 days of realistic synthetic demand data for AI model training...');
   const insertDemand = db.prepare(`
     INSERT INTO historical_demand (hospital_id, date, blood_group, component, units_demanded, units_supplied, units_shortage, stock_level, day_of_week)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const bloodGroups = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
-  const components = ['Packed Red Blood Cells (PRBC)', 'Platelets', 'Whole Blood', 'Plasma'];
-
-  // Base demand weights by blood group
-  const groupDemandBase = {
-    'O+': 5.2, 'O-': 2.8, 'A+': 4.1, 'A-': 1.6,
-    'B+': 4.5, 'B-': 1.4, 'AB+': 1.9, 'AB-': 0.8
-  };
-
-  const compDemandFactor = {
-    'Packed Red Blood Cells (PRBC)': 1.0,
-    'Platelets': 0.75,
-    'Whole Blood': 0.6,
-    'Plasma': 0.5
-  };
-
+  const groupDemandBase = { 'O+': 5.2, 'O-': 2.8, 'A+': 4.1, 'A-': 1.6, 'B+': 4.5, 'B-': 1.4, 'AB+': 1.9, 'AB-': 0.8 };
+  const compDemandFactor = { 'Packed Red Blood Cells (PRBC)': 1.0, 'Platelets': 0.75, 'Whole Blood': 0.6, 'Plasma': 0.5 };
   const today = new Date('2026-11-16');
 
-  // Generate 180 days backward
   for (let d = 180; d >= 1; d--) {
     const curDate = new Date(today);
     curDate.setDate(today.getDate() - d);
     const dateStr = curDate.toISOString().split('T')[0];
-    const dayOfWeek = curDate.getDay(); // 0 is Sunday, 6 is Saturday
+    const dayOfWeek = curDate.getDay();
 
-    // Weekend surge for emergency trauma
     const weekendMultiplier = (dayOfWeek === 0 || dayOfWeek === 6) ? 1.35 : 1.0;
-    // Seasonal variation (sinusoidal over 180 days)
     const seasonalMultiplier = 1.0 + 0.15 * Math.sin((180 - d) / 28);
 
-    // Pick top combinations to keep database size optimal and focused
     for (const bg of ['O+', 'O-', 'A+', 'B+']) {
       for (const comp of ['Packed Red Blood Cells (PRBC)', 'Platelets']) {
         const base = (groupDemandBase[bg] || 3.0) * (compDemandFactor[comp] || 1.0);
-        // Random gaussian-like fluctuation
         const randNoise = (Math.random() + Math.random() + Math.random() - 1.5) * 1.5;
         const demand = Math.max(0, Math.round(base * weekendMultiplier * seasonalMultiplier + randNoise));
-        
-        // Supply fluctuates with collection
         const supplied = Math.max(0, Math.min(demand, Math.round(demand - Math.max(0, Math.random() * 2 - 0.5))));
         const shortage = demand - supplied;
         const simulatedStock = Math.max(1, Math.round(base * 3 + randNoise * 2));
@@ -434,9 +513,13 @@ function seedDatabase() {
     }
   }
 
+  // 10. Seed applications & accounts
+  ensureApplicationsAndAccounts();
+
   console.log('Database seeded successfully.');
 }
 
 module.exports = {
-  seedDatabase
+  seedDatabase,
+  ensureApplicationsAndAccounts
 };

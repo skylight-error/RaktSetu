@@ -5,6 +5,7 @@ const { initSchema } = require('./db/database');
 const { seedDatabase } = require('./db/seedData');
 
 const authRoutes = require('./routes/authRoutes');
+const applicationRoutes = require('./routes/applicationRoutes');
 const hospitalRoutes = require('./routes/hospitalRoutes');
 const donorRoutes = require('./routes/donorRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
@@ -28,6 +29,7 @@ app.use(express.static(path.resolve(__dirname, '..', 'public')));
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/applications', applicationRoutes);
 app.use('/api/hospital', hospitalRoutes);
 app.use('/api/donor', donorRoutes);
 app.use('/api/inventory', inventoryRoutes);

@@ -4,7 +4,7 @@ const path = require('node:path');
 const DB_PATH = path.resolve(__dirname, '..', '..', 'raktsetu.db');
 const db = new DatabaseSync(DB_PATH);
 
-// Enable foreign keys and WAL mode for better concurrency
+// Enable foreign keys and WAL mode for reliability
 db.exec('PRAGMA foreign_keys = ON;');
 
 function initSchema() {
@@ -20,11 +20,40 @@ function initSchema() {
       latitude REAL NOT NULL,
       longitude REAL NOT NULL,
       password_hash TEXT NOT NULL,
+      password_salt TEXT,
       created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS donor_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      application_id TEXT UNIQUE NOT NULL,
+      full_name TEXT NOT NULL,
+      dob TEXT NOT NULL,
+      age INTEGER NOT NULL,
+      gender TEXT DEFAULT 'Unspecified',
+      mobile TEXT NOT NULL,
+      email TEXT,
+      blood_group TEXT NOT NULL,
+      address TEXT NOT NULL,
+      city TEXT NOT NULL,
+      pincode TEXT NOT NULL,
+      preferred_hospital_id INTEGER,
+      consent_contact INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'PENDING_APPROVAL',
+      reviewed_by_hospital_id INTEGER,
+      reviewed_by_staff_name TEXT,
+      reviewed_at TEXT,
+      rejection_reason TEXT,
+      activation_otp TEXT,
+      activation_otp_expires_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (preferred_hospital_id) REFERENCES hospitals(id),
+      FOREIGN KEY (reviewed_by_hospital_id) REFERENCES hospitals(id)
     );
 
     CREATE TABLE IF NOT EXISTS donors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      application_id INTEGER,
       full_name TEXT NOT NULL,
       dob TEXT NOT NULL,
       age INTEGER NOT NULL,
@@ -36,6 +65,9 @@ function initSchema() {
       city TEXT NOT NULL,
       pincode TEXT NOT NULL,
       preferred_hospital_id INTEGER,
+      registration_status TEXT DEFAULT 'APPROVED',
+      account_status TEXT DEFAULT 'ACTIVE',
+      medical_screening_status TEXT DEFAULT 'PENDING_SCREENING',
       screening_status TEXT DEFAULT 'PENDING SCREENING',
       screening_valid_until TEXT,
       last_donation_date TEXT,
@@ -47,7 +79,34 @@ function initSchema() {
       consent_contact INTEGER DEFAULT 1,
       source TEXT DEFAULT 'SELF_REGISTERED',
       created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (preferred_hospital_id) REFERENCES hospitals(id)
+      FOREIGN KEY (preferred_hospital_id) REFERENCES hospitals(id),
+      FOREIGN KEY (application_id) REFERENCES donor_applications(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS donor_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      application_id INTEGER UNIQUE,
+      donor_id INTEGER UNIQUE NOT NULL,
+      email TEXT,
+      mobile TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      account_status TEXT DEFAULT 'ACTIVE',
+      activated_at TEXT DEFAULT (datetime('now')),
+      last_login_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (application_id) REFERENCES donor_applications(id),
+      FOREIGN KEY (donor_id) REFERENCES donors(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      user_type TEXT NOT NULL,
+      role TEXT NOT NULL,
+      hospital_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS screening_records (
@@ -145,13 +204,15 @@ function initSchema() {
 
     CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      donor_id INTEGER NOT NULL,
+      donor_id INTEGER,
+      application_id INTEGER,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
       type TEXT NOT NULL,
       is_read INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (donor_id) REFERENCES donors(id)
+      FOREIGN KEY (donor_id) REFERENCES donors(id),
+      FOREIGN KEY (application_id) REFERENCES donor_applications(id)
     );
 
     CREATE TABLE IF NOT EXISTS historical_demand (
@@ -168,6 +229,23 @@ function initSchema() {
       FOREIGN KEY (hospital_id) REFERENCES hospitals(id)
     );
   `);
+
+  // Run schema migration checks for columns that might be missing in existing database files
+  const safeAddColumn = (table, column, colDef) => {
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${colDef};`);
+    } catch (e) {
+      // Column already exists or table doesn't need alteration
+    }
+  };
+
+  safeAddColumn('donors', 'application_id', 'INTEGER');
+  safeAddColumn('donors', 'registration_status', "TEXT DEFAULT 'APPROVED'");
+  safeAddColumn('donors', 'account_status', "TEXT DEFAULT 'ACTIVE'");
+  safeAddColumn('donors', 'medical_screening_status', "TEXT DEFAULT 'PENDING_SCREENING'");
+  safeAddColumn('donor_applications', 'donor_id', 'INTEGER');
+  safeAddColumn('hospitals', 'password_salt', 'TEXT');
+  safeAddColumn('notifications', 'application_id', 'INTEGER');
 }
 
 module.exports = {

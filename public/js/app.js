@@ -1,37 +1,60 @@
 /**
  * RaktSetu — Main Application Controller & Reactive UI
+ * Secure Donor Registration, Hospital Approval, Account Activation & Auth System
  */
 
 const AppState = {
-  currentView: 'landing', // 'landing', 'hospital', 'donor'
-  currentHospitalTab: 'dashboard', // 'dashboard', 'donors', 'inventory', 'requests', 'ai'
-  activeHospital: { id: 1, name: 'Metro General Hospital & Trauma Centre' },
+  currentView: 'landing', // 'landing', 'donor-login', 'hospital-login', 'track-status', 'hospital', 'donor'
+  currentHospitalTab: 'dashboard', // 'dashboard', 'applications', 'donors', 'inventory', 'requests', 'ai'
+  activeHospital: null,
   activeDonor: null,
-  demoAccounts: { hospitals: [], donors: [] },
-  activeModal: null, // 'donorRegister', 'manualDonor', 'excelImport', 'scheduleScreening', 'recordDecision', 'addStock', 'createRequest', 'matchDonors'
+  userType: 'PUBLIC', // 'PUBLIC', 'DONOR', 'HOSPITAL'
+  demoAccounts: { hospitals: [], donors: [], demoApplications: [] },
+  activeModal: null,
   selectedDonorForAction: null,
   selectedRequestForAction: null,
   activeMatchingResults: null,
-  notificationSimulationOpen: false
+  activationData: { applicationId: '', mobile: '', otp: '' }
 };
 
 // ============================================================================
-// INITIALIZATION
+// INITIALIZATION & SESSION RESTORATION
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
+  await restoreAuthSession();
   await loadDemoAccounts();
   renderApp();
 });
+
+async function restoreAuthSession() {
+  try {
+    const session = await API.getAuthSession();
+    if (session && session.authenticated) {
+      AppState.userType = session.userType;
+      if (session.userType === 'DONOR') {
+        AppState.activeDonor = session.user;
+        AppState.currentView = 'donor';
+      } else if (session.userType === 'HOSPITAL') {
+        AppState.activeHospital = session.user;
+        AppState.currentView = 'hospital';
+      }
+    } else {
+      AppState.userType = 'PUBLIC';
+      AppState.activeDonor = null;
+      AppState.activeHospital = null;
+    }
+  } catch (err) {
+    console.error('Failed to restore auth session:', err);
+    AppState.userType = 'PUBLIC';
+  }
+}
 
 async function loadDemoAccounts() {
   try {
     const data = await API.getDemoAccounts();
     AppState.demoAccounts = data;
-    if (data.donors && data.donors.length > 0) {
-      AppState.activeDonor = data.donors[0];
-    }
   } catch (err) {
-    console.error('Failed to load demo accounts', err);
+    console.error('Failed to load demo accounts metadata', err);
   }
 }
 
@@ -46,7 +69,7 @@ function showToast(message, type = 'info') {
     <span>${message}</span>
   `;
   container.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), 4500);
 }
 
 // ============================================================================
@@ -62,14 +85,14 @@ function renderApp() {
     <div class="demo-banner">
       <div style="display:flex; align-items:center;">
         <span class="demo-pill">DEMO ACCELERATOR</span>
-        <span>AI & Healthcare College Project Demonstration</span>
+        <span>Secure Donor Onboarding & Auth Demonstration</span>
       </div>
       <div class="demo-shortcuts">
-        <span style="color:#94a3b8; margin-right:4px;">Quick Switch:</span>
-        <button class="demo-btn" onclick="switchToHospital(1)">🏥 Metro Hospital</button>
-        <button class="demo-btn" onclick="switchToHospital(2)">🏥 City Life Blood Bank</button>
-        <button class="demo-btn" onclick="switchToDonor(1)">🩸 Rahul (Approved)</button>
-        <button class="demo-btn" onclick="switchToDonor(4)">🩸 Sneha (Pending)</button>
+        <span style="color:#94a3b8; margin-right:4px;">Evaluation Shortcuts:</span>
+        <button class="demo-btn" onclick="demoLoginHospital(1)">🏥 Login Metro Hospital</button>
+        <button class="demo-btn" onclick="demoLoginDonor(1)">🩸 Login Rahul (Approved)</button>
+        <button class="demo-btn" onclick="navigateTo('track-status')">📋 Track Status</button>
+        <button class="demo-btn" style="background:#7c3aed;" onclick="openActivationModal('DEMO-APP-APPROVED', '9811144455')">🚀 Test Activation</button>
         <button class="demo-btn" onclick="openDonorRegisterModal()">+ Register Donor</button>
         <button class="demo-btn" style="background:#b91c1c;" onclick="triggerSimulatedWeeklyPush()">🔔 Test Weekly Push</button>
       </div>
@@ -84,19 +107,49 @@ function renderApp() {
           <p>AI Blood Inventory & Donor Coordination Platform</p>
         </div>
       </div>
+
       <div class="nav-links">
         <button class="btn ${AppState.currentView === 'landing' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('landing')">
           Home
         </button>
-        <button class="btn ${AppState.currentView === 'hospital' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('hospital')">
-          ${Icons.hospital(16)} Hospital Portal
+
+        <button class="btn ${AppState.currentView === 'track-status' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('track-status')">
+          ${Icons.activity(15)} Track Application
         </button>
-        <button class="btn ${AppState.currentView === 'donor' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('donor')">
-          ${Icons.user(16)} Donor Portal
-        </button>
-        <button class="btn btn-secondary btn-sm" style="color:var(--primary-red); border-color:var(--primary-red-border);" onclick="openDonorRegisterModal()">
-          Register as Donor
-        </button>
+
+        ${AppState.userType === 'DONOR' && AppState.activeDonor ? `
+          <button class="btn ${AppState.currentView === 'donor' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('donor')">
+            ${Icons.user(16)} My Donor Portal
+          </button>
+          <div class="user-badge" style="background:var(--primary-red-light); color:var(--primary-red); border:1px solid var(--primary-red-border);">
+            <span class="blood-badge" style="width:22px; height:22px; font-size:10px;">${AppState.activeDonor.bloodGroup || '🩸'}</span>
+            <span>${AppState.activeDonor.fullName || 'Donor'}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="handleLogout()">
+            ${Icons.logOut(15)} Logout
+          </button>
+        ` : AppState.userType === 'HOSPITAL' && AppState.activeHospital ? `
+          <button class="btn ${AppState.currentView === 'hospital' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('hospital')">
+            ${Icons.hospital(16)} Hospital Portal
+          </button>
+          <div class="user-badge" style="background:#f1f5f9; color:var(--navy-dark); border:1px solid var(--border-color);">
+            ${Icons.hospital(14)}
+            <span>${AppState.activeHospital.name}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="handleLogout()">
+            ${Icons.logOut(15)} Logout
+          </button>
+        ` : `
+          <button class="btn ${AppState.currentView === 'donor-login' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('donor-login')">
+            ${Icons.user(16)} Donor Login
+          </button>
+          <button class="btn ${AppState.currentView === 'hospital-login' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('hospital-login')">
+            ${Icons.hospital(16)} Hospital Login
+          </button>
+          <button class="btn btn-secondary btn-sm" style="color:var(--primary-red); border-color:var(--primary-red-border);" onclick="openDonorRegisterModal()">
+            Register as Donor
+          </button>
+        `}
       </div>
     </nav>
 
@@ -106,6 +159,12 @@ function renderApp() {
 
   if (AppState.currentView === 'landing') {
     html += renderLandingPage();
+  } else if (AppState.currentView === 'donor-login') {
+    html += renderDonorLoginPage();
+  } else if (AppState.currentView === 'hospital-login') {
+    html += renderHospitalLoginPage();
+  } else if (AppState.currentView === 'track-status') {
+    html += renderStatusTrackerPage();
   } else if (AppState.currentView === 'hospital') {
     html += renderHospitalPortal();
   } else if (AppState.currentView === 'donor') {
@@ -131,86 +190,118 @@ function renderApp() {
 }
 
 function navigateTo(view) {
-  AppState.currentView = view;
+  // Navigation Guards (Requirement 8 & 9)
+  if (view === 'donor' && AppState.userType !== 'DONOR') {
+    showToast('Please log in with your donor account to access the dashboard.');
+    AppState.currentView = 'donor-login';
+  } else if (view === 'hospital' && AppState.userType !== 'HOSPITAL') {
+    showToast('Please log in with hospital credentials to access the hospital portal.');
+    AppState.currentView = 'hospital-login';
+  } else {
+    AppState.currentView = view;
+  }
+
   renderApp();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function switchToHospital(hospitalId) {
-  const h = AppState.demoAccounts.hospitals.find(x => x.id === hospitalId) || { id: hospitalId, name: `Hospital #${hospitalId}` };
-  AppState.activeHospital = h;
-  AppState.currentView = 'hospital';
-  renderApp();
-  showToast(`Switched to ${h.name}`);
+async function handleLogout() {
+  try {
+    await API.logout();
+    AppState.userType = 'PUBLIC';
+    AppState.activeDonor = null;
+    AppState.activeHospital = null;
+    showToast('Logged out successfully.');
+    navigateTo('landing');
+  } catch (err) {
+    showToast('Error logging out: ' + err.message, 'error');
+  }
 }
 
-async function switchToDonor(donorId) {
+// Demo quick-logins for presentations
+async function demoLoginHospital(hospitalId) {
   try {
-    const data = await API.getDonorPortalData(donorId);
-    AppState.activeDonor = data.donor;
+    const email = hospitalId === 2 ? 'citylife.bank@raktsetu.org' : 'metro.bloodbank@raktsetu.org';
+    const res = await API.hospitalLogin(email, 'hospital123');
+    AppState.activeHospital = res.hospital;
+    AppState.userType = 'HOSPITAL';
+    AppState.currentView = 'hospital';
+    renderApp();
+    showToast(`Authenticated as ${res.hospital.name}`);
+  } catch (err) {
+    showToast('Hospital login failed: ' + err.message, 'error');
+  }
+}
+
+async function demoLoginDonor(donorId) {
+  try {
+    const mobile = donorId === 2 ? '+91 98765 43211' : '+91 98765 43210';
+    const res = await API.donorLogin(mobile, 'donor123');
+    AppState.activeDonor = res.donor;
+    AppState.userType = 'DONOR';
     AppState.currentView = 'donor';
     renderApp();
-    showToast(`Switched to Donor: ${data.donor.full_name} (${data.donor.blood_group})`);
+    showToast(`Authenticated as ${res.donor.fullName} (${res.donor.bloodGroup})`);
   } catch (err) {
-    showToast('Failed to switch donor', 'error');
+    showToast('Donor login failed: ' + err.message, 'error');
   }
 }
 
 // ============================================================================
-// 1. LANDING PAGE VIEW
+// 1. PUBLIC LANDING PAGE VIEW (Requirement 2)
 // ============================================================================
 function renderLandingPage() {
   return `
-    <div class="landing-hero" style="background:#ffffff; border-radius:var(--radius-lg); padding:48px 36px; border:1px solid var(--border-color); margin-bottom:32px; box-shadow:var(--shadow-md);">
+    <div class="landing-hero" style="background:#ffffff; border-radius:var(--radius-lg); padding:44px 36px; border:1px solid var(--border-color); margin-bottom:28px; box-shadow:var(--shadow-md);">
       <div style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:36px; align-items:center;">
         <div>
           <div style="display:inline-flex; align-items:center; gap:8px; padding:4px 12px; background:var(--primary-red-light); color:var(--primary-red); border-radius:9999px; font-weight:700; font-size:12px; margin-bottom:16px;">
-            ${Icons.sparkles(16, '#dc2626')} AI-POWERED HEALTHCARE COLLABORATION
+            ${Icons.sparkles(16, '#dc2626')} VERIFIED HEALTHCARE BLOOD DONATION NETWORK
           </div>
           <h1 style="font-size:38px; font-weight:800; color:var(--navy-dark); line-height:1.2; margin-bottom:16px;">
             Connecting Blood Needs with the Right Donors.
           </h1>
-          <p style="font-size:16px; color:var(--text-muted); line-height:1.6; margin-bottom:28px;">
+          <p style="font-size:16px; color:var(--text-muted); line-height:1.6; margin-bottom:24px;">
             An intelligent platform helping hospitals coordinate potential donors, monitor blood inventory, anticipate critical shortages using machine learning, and bridge emergency demand.
           </p>
-          <div style="display:flex; gap:14px; flex-wrap:wrap;">
-            <button class="btn btn-primary btn-lg" onclick="navigateTo('hospital')">
-              ${Icons.hospital(18)} Hospital Portal Login
-            </button>
-            <button class="btn btn-secondary btn-lg" onclick="navigateTo('donor')">
+          <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <button class="btn btn-primary btn-lg" onclick="navigateTo('donor-login')">
               ${Icons.user(18)} Donor Portal Login
+            </button>
+            <button class="btn btn-secondary btn-lg" onclick="navigateTo('hospital-login')">
+              ${Icons.hospital(18)} Hospital Portal Login
             </button>
             <button class="btn btn-secondary btn-lg" style="color:var(--primary-red); border-color:var(--primary-red);" onclick="openDonorRegisterModal()">
               ${Icons.bloodDrop(18)} Register as a Donor
             </button>
+            <button class="btn btn-secondary btn-lg" onclick="navigateTo('track-status')">
+              ${Icons.activity(18)} Track Application
+            </button>
           </div>
-          <div style="margin-top:24px; font-size:12px; color:var(--text-light); display:flex; gap:16px; align-items:center;">
-            <span>✓ Persistent SQLite Storage</span>
-            <span>✓ Genuine ML Regression Model</span>
-            <span>✓ Excel / CSV Batch Importer</span>
+          <div style="margin-top:20px; font-size:12px; color:var(--text-light); display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+            <span>✓ Verified Hospital Approval</span>
+            <span>✓ Secure Password-Protected Accounts</span>
+            <span>✓ Genuine ML Demand Forecasting</span>
           </div>
         </div>
 
         <!-- Healthcare Bridge Visual Motif -->
-        <div style="background:var(--bg-subtle); border-radius:var(--radius-lg); padding:28px; border:1px solid var(--border-color); text-align:center;">
-          <div style="position:relative; width:100%; height:200px; display:flex; align-items:center; justify-content:space-around;">
-            <!-- Hospital Node -->
-            <div style="background:#ffffff; border:2px solid var(--border-color); border-radius:var(--radius-md); padding:16px; box-shadow:var(--shadow-sm); z-index:2;">
-              ${Icons.hospital(36, '#0f172a')}
-              <div style="font-size:12px; font-weight:700; margin-top:6px;">Hospitals</div>
-              <div style="font-size:10px; color:var(--text-muted);">Inventory & Needs</div>
+        <div style="background:var(--bg-subtle); border-radius:var(--radius-lg); padding:24px; border:1px solid var(--border-color); text-align:center;">
+          <div style="position:relative; width:100%; height:180px; display:flex; align-items:center; justify-content:space-around;">
+            <div style="background:#ffffff; border:2px solid var(--border-color); border-radius:var(--radius-md); padding:14px; box-shadow:var(--shadow-sm); z-index:2;">
+              ${Icons.hospital(32, '#0f172a')}
+              <div style="font-size:12px; font-weight:700; margin-top:4px;">Hospitals</div>
+              <div style="font-size:10px; color:var(--text-muted);">Review & Needs</div>
             </div>
 
-            <!-- Central Bridge Node -->
-            <div style="background:var(--primary-red-light); border:2px dashed var(--blood-accent); border-radius:50%; width:80px; height:80px; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:2; box-shadow:0 0 15px rgba(220,38,38,0.2);">
-              ${Icons.bloodDrop(28, '#dc2626')}
+            <div style="background:var(--primary-red-light); border:2px dashed var(--blood-accent); border-radius:50%; width:76px; height:76px; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:2; box-shadow:0 0 15px rgba(220,38,38,0.2);">
+              ${Icons.bloodDrop(26, '#dc2626')}
               <span style="font-size:9px; font-weight:800; color:var(--primary-red);">RAKTSETU</span>
             </div>
 
-            <!-- Donor Node -->
-            <div style="background:#ffffff; border:2px solid var(--border-color); border-radius:var(--radius-md); padding:16px; box-shadow:var(--shadow-sm); z-index:2;">
-              ${Icons.users(36, '#dc2626')}
-              <div style="font-size:12px; font-weight:700; margin-top:6px;">Donors</div>
+            <div style="background:#ffffff; border:2px solid var(--border-color); border-radius:var(--radius-md); padding:14px; box-shadow:var(--shadow-sm); z-index:2;">
+              ${Icons.users(32, '#dc2626')}
+              <div style="font-size:12px; font-weight:700; margin-top:4px;">Donors</div>
               <div style="font-size:10px; color:var(--text-muted);">Verified Standby</div>
             </div>
           </div>
@@ -221,67 +312,57 @@ function renderLandingPage() {
       </div>
     </div>
 
-    <!-- How RaktSetu Works Section -->
-    <div class="card" style="margin-bottom:32px;">
+    <!-- Onboarding & Approval Instructions (Requirement 2 & 10) -->
+    <div class="card" style="margin-bottom:28px;">
       <div class="card-header">
-        <h2 class="card-title">${Icons.activity(20, '#dc2626')} How RaktSetu Works — End-to-End Coordination Workflow</h2>
+        <h2 class="card-title">${Icons.shieldCheck(20, '#059669')} Complete Donor Onboarding & Verification Workflow</h2>
       </div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px;">
-        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">01</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Register as a Donor</div>
-          <p style="font-size:12px; color:var(--text-muted);">Donors self-register or hospitals import existing records from legacy spreadsheets.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--navy-dark);">
+          <div style="font-size:16px; font-weight:800; color:var(--navy-dark);">Step 1: Apply</div>
+          <div style="font-weight:700; font-size:13px; margin:4px 0;">Submit Application</div>
+          <p style="font-size:12px; color:var(--text-muted);">Fill the registration application. A unique Application ID is generated with status <strong>PENDING APPROVAL</strong>.</p>
+        </div>
+        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--status-amber);">
+          <div style="font-size:16px; font-weight:800; color:var(--status-amber);">Step 2: Verification</div>
+          <div style="font-weight:700; font-size:13px; margin:4px 0;">Hospital Staff Review</div>
+          <p style="font-size:12px; color:var(--text-muted);">Authorised hospital staff review your application details, verify jurisdiction, and approve your registration.</p>
+        </div>
+        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid #7c3aed);">
+          <div style="font-size:16px; font-weight:800; color:#7c3aed;">Step 3: Activation</div>
+          <div style="font-weight:700; font-size:13px; margin:4px 0;">Set Account Password</div>
+          <p style="font-size:12px; color:var(--text-muted);">Once approved, verify using your OTP to create a secure password and activate your active donor login.</p>
         </div>
         <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">02</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Hospital Screening</div>
-          <p style="font-size:12px; color:var(--text-muted);">Authorized medical staff schedule pre-donation health checkups and approve fitness.</p>
-        </div>
-        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">03</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Approved Network</div>
-          <p style="font-size:12px; color:var(--text-muted);">Only donors with current valid screening entered into emergency matching pool.</p>
-        </div>
-        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">04</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Weekly Check-ins</div>
-          <p style="font-size:12px; color:var(--text-muted);">Weekly reminders track live availability (Yes / Maybe / No) for the upcoming week.</p>
-        </div>
-        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">05</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Smart Mobilisation</div>
-          <p style="font-size:12px; color:var(--text-muted);">Hospital requests trigger AI compatibility and proximity ranking to contact nearby donors.</p>
-        </div>
-        <div style="background:var(--bg-subtle); padding:16px; border-radius:var(--radius-sm); border-top:3px solid var(--primary-red);">
-          <div style="font-size:18px; font-weight:800; color:var(--primary-red);">06</div>
-          <div style="font-weight:700; font-size:14px; margin:6px 0;">Inventory Planning</div>
-          <p style="font-size:12px; color:var(--text-muted);">Machine learning forecasts 7-day blood demand and flags shortage risks proactively.</p>
+          <div style="font-size:16px; font-weight:800; color:var(--primary-red);">Step 4: Clinical Fitness</div>
+          <div style="font-weight:700; font-size:13px; margin:4px 0;">Pre-Donation Screening</div>
+          <p style="font-size:12px; color:var(--text-muted);">Physical medical checkup (Hb, vitals, vein health) is scheduled by hospital medical staff before actual donation.</p>
         </div>
       </div>
     </div>
 
-    <!-- AI & Product Principle Highlights -->
+    <!-- AI & Product Principles -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
       <div class="card">
         <h3 class="card-title" style="margin-bottom:12px;">
-          ${Icons.sparkles(18, '#7c3aed')} Genuine AI & Machine Learning Features
+          ${Icons.sparkles(18, '#7c3aed')} AI & Machine Learning Features
         </h3>
         <ul style="font-size:13px; color:var(--navy-slate); line-height:1.7; padding-left:18px;">
-          <li><strong>Demand Forecasting Model:</strong> Multivariate Ridge regularized time-series regression trained on multi-month historical hospital consumption records.</li>
-          <li><strong>Explainable Shortage Risk:</strong> 7-day future projections comparing usable inventory against scheduled collections and cyclical harmonics.</li>
-          <li><strong>Smart Donor Prioritisation:</strong> Multi-criteria explainable ranker combining component compatibility, active screening validity, rest intervals, and geodesic distance.</li>
+          <li><strong>Demand Forecasting Model:</strong> Multivariate Ridge regularized time-series regression trained on 180 days of historical demand.</li>
+          <li><strong>Explainable Shortage Risk:</strong> 7-day future projections comparing usable inventory against scheduled collections.</li>
+          <li><strong>Intelligent Donor Prioritisation:</strong> Multi-criteria ranker combining component compatibility, rest intervals, and geodesic distance.</li>
         </ul>
       </div>
 
       <div class="card" style="border-left:4px solid var(--primary-red);">
         <h3 class="card-title" style="margin-bottom:12px; color:var(--primary-red);">
-          ${Icons.shieldCheck(18, '#991b1b')} Important Healthcare Product Principle
+          ${Icons.shieldCheck(18, '#991b1b')} Important Healthcare Distinction
         </h3>
         <p style="font-size:13px; color:var(--navy-slate); line-height:1.6;">
-          RaktSetu is a decision-support and donor coordination platform. It does <strong>not</strong> replace qualified blood banks, donor medical screening, laboratory testing, compatibility cross-matching, or clinical medical decisions.
+          <strong>Registration Approval ≠ Medical Fitness:</strong> Approval of a registration application permits account activation and coordination. Only qualified clinical medical staff can determine physical fitness to donate blood.
         </p>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:10px;">
-          Donor availability does not equate to clinical eligibility, and potential donors are never treated as pre-packaged blood units.
+        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+          RaktSetu is a decision-support aid and does not bypass blood compatibility cross-matching.
         </p>
       </div>
     </div>
@@ -289,17 +370,513 @@ function renderLandingPage() {
 }
 
 // ============================================================================
-// 2. HOSPITAL PORTAL VIEW
+// 2. DONOR LOGIN VIEW (Requirement 7)
+// ============================================================================
+function renderDonorLoginPage() {
+  return `
+    <div class="auth-wrapper">
+      <div class="auth-tabs">
+        <button class="auth-tab-btn active" onclick="navigateTo('donor-login')">
+          ${Icons.user(14)} Donor Login
+        </button>
+        <button class="auth-tab-btn" onclick="navigateTo('hospital-login')">
+          ${Icons.hospital(14)} Hospital Login
+        </button>
+        <button class="auth-tab-btn" onclick="navigateTo('track-status')">
+          ${Icons.activity(14)} Track Status
+        </button>
+      </div>
+
+      <div class="auth-card">
+        <div style="text-align:center; margin-bottom:24px;">
+          <div style="display:inline-block; margin-bottom:8px;">${Icons.bloodDrop(36, '#dc2626')}</div>
+          <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">Donor Portal Login</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Sign in to update your weekly availability and view appointments.
+          </p>
+        </div>
+
+        <form onsubmit="handleDonorLoginSubmit(event)" id="donorLoginForm">
+          <div class="form-group">
+            <label class="form-label">Registered Mobile Number or Email *</label>
+            <input type="text" name="identifier" id="donorLoginIdentifier" class="form-control" required placeholder="+91 98765 43210 or email" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Account Password *</label>
+            <input type="password" name="password" id="donorLoginPassword" class="form-control" required placeholder="Enter your password" />
+          </div>
+
+          <div id="donorLoginError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px 12px; font-size:12px; color:#991b1b; margin-bottom:16px;"></div>
+
+          <button type="submit" class="btn btn-primary btn-lg" style="width:100%; margin-top:8px;">
+            Log In to Donor Portal
+          </button>
+        </form>
+
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); font-size:12px; display:flex; flex-direction:column; gap:8px;">
+          <div>
+            Approved by hospital but haven't set a password?
+            <a href="javascript:void(0)" onclick="openActivationModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none;">
+              Activate My Account →
+            </a>
+          </div>
+          <div>
+            Want to check your registration review status?
+            <a href="javascript:void(0)" onclick="navigateTo('track-status')" style="color:var(--navy-dark); font-weight:700; text-decoration:none;">
+              Track Application Status →
+            </a>
+          </div>
+          <div>
+            Haven't registered yet?
+            <a href="javascript:void(0)" onclick="openDonorRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none;">
+              Apply to Become a Donor →
+            </a>
+          </div>
+        </div>
+
+        <!-- Quick Demo Credentials Box for Evaluation -->
+        <div class="demo-helper-box">
+          <div>💡 <strong>Demo Donor Login:</strong> Mobile: <code>+91 98765 43210</code> • Password: <code>donor123</code></div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="fillDemoDonorCredentials()">
+            Auto-Fill
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function fillDemoDonorCredentials() {
+  document.getElementById('donorLoginIdentifier').value = '+91 98765 43210';
+  document.getElementById('donorLoginPassword').value = 'donor123';
+}
+
+async function handleDonorLoginSubmit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const identifier = form.identifier.value.trim();
+  const password = form.password.value;
+  const errorBox = document.getElementById('donorLoginError');
+
+  errorBox.style.display = 'none';
+
+  try {
+    const res = await API.donorLogin(identifier, password);
+    AppState.activeDonor = res.donor;
+    AppState.userType = 'DONOR';
+    AppState.currentView = 'donor';
+    showToast(`Welcome back, ${res.donor.fullName}!`);
+    renderApp();
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  }
+}
+
+// ============================================================================
+// 3. HOSPITAL LOGIN VIEW (Requirement 9)
+// ============================================================================
+function renderHospitalLoginPage() {
+  return `
+    <div class="auth-wrapper">
+      <div class="auth-tabs">
+        <button class="auth-tab-btn" onclick="navigateTo('donor-login')">
+          ${Icons.user(14)} Donor Login
+        </button>
+        <button class="auth-tab-btn active" onclick="navigateTo('hospital-login')">
+          ${Icons.hospital(14)} Hospital Login
+        </button>
+        <button class="auth-tab-btn" onclick="navigateTo('track-status')">
+          ${Icons.activity(14)} Track Status
+        </button>
+      </div>
+
+      <div class="auth-card">
+        <div style="text-align:center; margin-bottom:24px;">
+          <div style="display:inline-block; margin-bottom:8px;">${Icons.hospital(36, '#0f172a')}</div>
+          <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">Hospital Staff Portal</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Authorized blood centre staff login for inventory, donor review & matching.
+          </p>
+        </div>
+
+        <form onsubmit="handleHospitalLoginSubmit(event)">
+          <div class="form-group">
+            <label class="form-label">Hospital Email Address *</label>
+            <input type="email" name="email" id="hospitalLoginEmail" class="form-control" required placeholder="metro.bloodbank@raktsetu.org" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Staff Password *</label>
+            <input type="password" name="password" id="hospitalLoginPassword" class="form-control" required placeholder="Enter hospital password" />
+          </div>
+
+          <div id="hospitalLoginError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px 12px; font-size:12px; color:#991b1b; margin-bottom:16px;"></div>
+
+          <button type="submit" class="btn btn-primary btn-lg" style="width:100%; margin-top:8px;">
+            Log In as Hospital Staff
+          </button>
+        </form>
+
+        <!-- Quick Demo Credentials Box for Evaluation -->
+        <div class="demo-helper-box">
+          <div>💡 <strong>Demo Hospital:</strong> Email: <code>metro.bloodbank@raktsetu.org</code> • Password: <code>hospital123</code></div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="fillDemoHospitalCredentials()">
+            Auto-Fill
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function fillDemoHospitalCredentials() {
+  document.getElementById('hospitalLoginEmail').value = 'metro.bloodbank@raktsetu.org';
+  document.getElementById('hospitalLoginPassword').value = 'hospital123';
+}
+
+async function handleHospitalLoginSubmit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const email = form.email.value.trim();
+  const password = form.password.value;
+  const errorBox = document.getElementById('hospitalLoginError');
+
+  errorBox.style.display = 'none';
+
+  try {
+    const res = await API.hospitalLogin(email, password);
+    AppState.activeHospital = res.hospital;
+    AppState.userType = 'HOSPITAL';
+    AppState.currentView = 'hospital';
+    showToast(`Authenticated as ${res.hospital.name}`);
+    renderApp();
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  }
+}
+
+// ============================================================================
+// 4. DONOR APPLICATION STATUS TRACKING VIEW (Requirement 4)
+// ============================================================================
+function renderStatusTrackerPage() {
+  return `
+    <div class="auth-wrapper" style="max-width:540px;">
+      <div class="auth-tabs">
+        <button class="auth-tab-btn" onclick="navigateTo('donor-login')">
+          ${Icons.user(14)} Donor Login
+        </button>
+        <button class="auth-tab-btn" onclick="navigateTo('hospital-login')">
+          ${Icons.hospital(14)} Hospital Login
+        </button>
+        <button class="auth-tab-btn active" onclick="navigateTo('track-status')">
+          ${Icons.activity(14)} Track Status
+        </button>
+      </div>
+
+      <div class="auth-card">
+        <div style="text-align:center; margin-bottom:20px;">
+          <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">Check Registration Status</h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Enter your Application ID and registered mobile number to check hospital verification status.
+          </p>
+        </div>
+
+        <form onsubmit="handleCheckStatusSubmit(event)">
+          <div class="form-group">
+            <label class="form-label">Application ID *</label>
+            <input type="text" id="trackAppIdInput" name="applicationId" class="form-control" required placeholder="e.g. DEMO-APP-PENDING or RS-APP-..." />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Registered Mobile Number *</label>
+            <input type="tel" id="trackMobileInput" name="mobile" class="form-control" required placeholder="e.g. 9811122233" />
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="width:100%; margin-top:6px;">
+            Check Status
+          </button>
+        </form>
+
+        <!-- Evaluation Quick Tests -->
+        <div style="margin-top:16px; padding:12px; background:var(--bg-subtle); border-radius:var(--radius-sm); border:1px solid var(--border-color);">
+          <div style="font-size:11px; font-weight:700; color:var(--navy-slate); margin-bottom:8px;">QUICK DEMO SCENARIO TESTS:</div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <button class="btn btn-secondary btn-sm" onclick="fillStatusTrackerDemo('DEMO-APP-PENDING', '9811122233')">
+              ⏳ Check Pending Application (Vikram Joshi)
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="fillStatusTrackerDemo('DEMO-APP-APPROVED', '9811144455')">
+              ✅ Check Approved Application (Divya Nair)
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="fillStatusTrackerDemo('DEMO-APP-REJECTED', '9811166677')">
+              ❌ Check Rejected Application (Karan Singhal)
+            </button>
+          </div>
+        </div>
+
+        <!-- Result Container -->
+        <div id="statusTrackerResult" style="margin-top:20px;"></div>
+      </div>
+    </div>
+  `;
+}
+
+function fillStatusTrackerDemo(appId, mobile) {
+  document.getElementById('trackAppIdInput').value = appId;
+  document.getElementById('trackMobileInput').value = mobile;
+}
+
+async function handleCheckStatusSubmit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const appId = form.applicationId.value.trim();
+  const mobile = form.mobile.value.trim();
+  const resultContainer = document.getElementById('statusTrackerResult');
+
+  resultContainer.innerHTML = `<div style="text-align:center; padding:16px; color:var(--text-muted);">Verifying registration records...</div>`;
+
+  try {
+    const data = await API.checkApplicationStatus(appId, mobile);
+    renderStatusTrackerResult(data);
+  } catch (err) {
+    resultContainer.innerHTML = `
+      <div style="background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:12px; font-size:12px; color:#991b1b;">
+        ${err.message}
+      </div>
+    `;
+  }
+}
+
+function renderStatusTrackerResult(data) {
+  const container = document.getElementById('statusTrackerResult');
+  if (!container) return;
+
+  const isPending = data.status === 'PENDING_APPROVAL';
+  const isApproved = data.status === 'APPROVED';
+  const isRejected = data.status === 'REJECTED';
+
+  container.innerHTML = `
+    <div style="background:#ffffff; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:18px; box-shadow:var(--shadow-sm);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-size:11px; font-weight:700; color:var(--text-muted);">APPLICATION ID</span>
+        <strong style="font-size:13px; color:var(--navy-dark);">${data.applicationId}</strong>
+      </div>
+
+      <!-- Visual Progress Timeline -->
+      <div class="status-timeline">
+        <div class="timeline-step completed">
+          <div class="step-circle">✓</div>
+          <div class="step-label">Submitted</div>
+          <div class="step-desc">${data.submittedAt ? data.submittedAt.slice(0, 10) : 'Done'}</div>
+        </div>
+        <div class="timeline-step ${isApproved ? 'completed' : isRejected ? 'rejected' : 'active'}">
+          <div class="step-circle">${isApproved ? '✓' : isRejected ? '✕' : '⏳'}</div>
+          <div class="step-label">Hospital Review</div>
+          <div class="step-desc">${data.status}</div>
+        </div>
+        <div class="timeline-step ${data.isActivated ? 'completed' : isApproved ? 'active' : ''}">
+          <div class="step-circle">${data.isActivated ? '✓' : '3'}</div>
+          <div class="step-label">Account Activation</div>
+          <div class="step-desc">${data.isActivated ? 'Active' : isApproved ? 'Ready' : 'Pending'}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; padding:12px; background:${isApproved ? '#f0fdf4' : isRejected ? '#fff1f2' : 'var(--bg-subtle)'}; border:1px solid ${isApproved ? '#bbf7d0' : isRejected ? '#fecdd3' : 'var(--border-color)'}; border-radius:var(--radius-sm);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <strong style="font-size:13px; color:var(--navy-dark);">${data.applicantName} (${data.bloodGroup})</strong>
+          <span class="status-badge ${data.statusBadgeClass}">${data.status}</span>
+        </div>
+        <p style="font-size:12px; color:var(--navy-slate); line-height:1.5;">${data.statusMessage}</p>
+
+        ${isRejected && data.rejectionReason ? `
+          <div style="margin-top:6px; font-size:11px; color:#991b1b; font-weight:600;">
+            Reason: ${data.rejectionReason}
+          </div>
+        ` : ''}
+
+        ${data.reviewedByStaffName ? `
+          <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+            Reviewed by: ${data.reviewedByStaffName} ${data.reviewedAt ? `on ${data.reviewedAt.slice(0, 10)}` : ''}
+          </div>
+        ` : ''}
+      </div>
+
+      ${data.canActivate ? `
+        <div style="margin-top:16px;">
+          <button class="btn btn-primary" style="width:100%;" onclick="openActivationModal('${data.applicationId}', '${data.maskedMobile}')">
+            ${Icons.sparkles(16, '#ffffff')} Activate My Account Now
+          </button>
+        </div>
+      ` : data.isActivated ? `
+        <div style="margin-top:16px;">
+          <button class="btn btn-secondary" style="width:100%;" onclick="navigateTo('donor-login')">
+            Proceed to Donor Login →
+          </button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// ============================================================================
+// 5. FIRST-TIME ACCOUNT ACTIVATION MODAL (Requirement 6)
+// ============================================================================
+function openActivationModal(defaultAppId = '', defaultMobile = '') {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="closeModal(event)">
+      <div class="modal-box" style="max-width:520px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+            ${Icons.sparkles(18, '#7c3aed')} First-Time Donor Account Activation
+          </h3>
+          <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+        </div>
+
+        <div class="modal-body" id="activationModalBody">
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+            Enter your approved Application ID and registered mobile number to verify your identity and set your account password.
+          </p>
+
+          <form onsubmit="handleActivationCodeRequest(event)">
+            <div class="form-group">
+              <label class="form-label">Application ID *</label>
+              <input type="text" id="actAppId" class="form-control" required value="${defaultAppId}" placeholder="e.g. DEMO-APP-APPROVED" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Registered Mobile Number *</label>
+              <input type="tel" id="actMobile" class="form-control" required value="${defaultMobile}" placeholder="e.g. 9811144455" />
+            </div>
+
+            <div id="actRequestError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-bottom:12px;"></div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">
+              Send Verification Code / OTP
+            </button>
+          </form>
+
+          <div id="activationStep2Section" style="margin-top:20px; display:none;"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleActivationCodeRequest(e) {
+  e.preventDefault();
+  const appId = document.getElementById('actAppId').value.trim();
+  const mobile = document.getElementById('actMobile').value.trim();
+  const errorBox = document.getElementById('actRequestError');
+  const step2 = document.getElementById('activationStep2Section');
+
+  errorBox.style.display = 'none';
+
+  try {
+    const res = await API.requestActivationCode(appId, mobile);
+    AppState.activationData = { applicationId: appId, mobile, otp: res.demoActivationOtp };
+    renderActivationStep2(res);
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  }
+}
+
+function renderActivationStep2(res) {
+  const step2 = document.getElementById('activationStep2Section');
+  if (!step2) return;
+
+  step2.style.display = 'block';
+  step2.innerHTML = `
+    <div style="border-top:2px dashed var(--border-color); padding-top:16px;">
+      <!-- Clearly labeled demo verification notice -->
+      <div style="background:#fef3c7; border:1px solid #fcd34d; border-radius:var(--radius-sm); padding:10px 12px; font-size:12px; color:#92400e; margin-bottom:14px;">
+        <strong>${res.demoOtpNotice}</strong><br/>
+        Simulated 6-digit OTP code for testing: <strong style="font-size:15px; letter-spacing:2px; color:var(--navy-dark);">${res.demoActivationOtp}</strong>
+      </div>
+
+      <form onsubmit="handleFinalAccountActivation(event)">
+        <div class="form-group">
+          <label class="form-label">6-Digit Verification Code (OTP) *</label>
+          <input type="text" id="actOtpCode" class="form-control" required value="${res.demoActivationOtp || ''}" placeholder="Enter 6-digit OTP" />
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Create Password (min 6 chars) *</label>
+            <input type="password" id="actNewPass" class="form-control" required placeholder="Choose a password" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm Password *</label>
+            <input type="password" id="actConfirmPass" class="form-control" required placeholder="Confirm password" />
+          </div>
+        </div>
+
+        <div id="actFinalError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-bottom:12px;"></div>
+
+        <button type="submit" class="btn btn-success" style="width:100%;">
+          Complete Activation & Create Account
+        </button>
+      </form>
+    </div>
+  `;
+}
+
+async function handleFinalAccountActivation(e) {
+  e.preventDefault();
+  const otp = document.getElementById('actOtpCode').value.trim();
+  const password = document.getElementById('actNewPass').value;
+  const confirmPassword = document.getElementById('actConfirmPass').value;
+  const errorBox = document.getElementById('actFinalError');
+
+  errorBox.style.display = 'none';
+
+  if (password.length < 6) {
+    errorBox.textContent = 'Password must be at least 6 characters.';
+    errorBox.style.display = 'block';
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    errorBox.textContent = 'Passwords do not match.';
+    errorBox.style.display = 'block';
+    return;
+  }
+
+  try {
+    const res = await API.activateDonorAccount({
+      applicationId: AppState.activationData.applicationId,
+      mobile: AppState.activationData.mobile,
+      activationCode: otp,
+      password,
+      confirmPassword
+    });
+
+    closeModal();
+    showToast(res.message);
+    navigateTo('donor-login');
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+  }
+}
+
+// ============================================================================
+// 6. HOSPITAL PORTAL VIEW (Requirement 5 & 9)
 // ============================================================================
 function renderHospitalPortal() {
-  const h = AppState.activeHospital;
+  const h = AppState.activeHospital || { name: 'Hospital Portal' };
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div>
         <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">${h.name}</h2>
         <p style="font-size:12px; color:var(--text-muted);">
-          Hospital Portal & Blood Centre Operations • ${h.address || 'Mumbai'}
+          Hospital Portal & Blood Centre Operations • Authorized Staff Access
         </p>
       </div>
       <div style="display:flex; gap:10px;">
@@ -312,10 +889,13 @@ function renderHospitalPortal() {
       </div>
     </div>
 
-    <!-- Portal Navigation Tabs -->
+    <!-- Portal Navigation Tabs (With Applications Tab - Requirement 5) -->
     <div class="portal-tabs">
       <button class="tab-btn ${AppState.currentHospitalTab === 'dashboard' ? 'active' : ''}" onclick="switchHospitalTab('dashboard')">
         ${Icons.activity(16)} Dashboard Overview
+      </button>
+      <button class="tab-btn ${AppState.currentHospitalTab === 'applications' ? 'active' : ''}" onclick="switchHospitalTab('applications')" id="hospitalApplicationsTabBtn">
+        ${Icons.shieldCheck(16)} Donor Applications
       </button>
       <button class="tab-btn ${AppState.currentHospitalTab === 'donors' ? 'active' : ''}" onclick="switchHospitalTab('donors')">
         ${Icons.users(16)} Donor Registry & Screening
@@ -348,10 +928,12 @@ async function loadHospitalDashboard() {
   if (!content) return;
 
   try {
-    const summary = await API.getHospitalSummary(AppState.activeHospital.id);
+    const summary = await API.getHospitalSummary(AppState.activeHospital ? AppState.activeHospital.id : 1);
 
     if (AppState.currentHospitalTab === 'dashboard') {
       renderHospitalOverviewTab(content, summary);
+    } else if (AppState.currentHospitalTab === 'applications') {
+      loadHospitalApplicationsTab(content);
     } else if (AppState.currentHospitalTab === 'donors') {
       loadDonorManagementTab(content);
     } else if (AppState.currentHospitalTab === 'inventory') {
@@ -362,7 +944,7 @@ async function loadHospitalDashboard() {
       loadAiPredictionTab(content);
     }
   } catch (err) {
-    content.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load hospital metrics: ${err.message}</div>`;
+    content.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load hospital metrics: ${err.message}. Please log in again.</div>`;
   }
 }
 
@@ -378,6 +960,11 @@ function renderHospitalOverviewTab(container, summary) {
         <div class="metric-value">${m.totalBloodUnits} <span style="font-size:14px; font-weight:500;">units</span></div>
         <div class="metric-sub">Usable unexpired blood</div>
       </div>
+      <div class="metric-card ${m.pendingApplications > 0 ? 'critical' : 'info'}" style="cursor:pointer;" onclick="switchHospitalTab('applications')">
+        <div class="metric-title">Pending Applications</div>
+        <div class="metric-value" style="color:${m.pendingApplications > 0 ? 'var(--blood-accent)' : 'inherit'};">${m.pendingApplications}</div>
+        <div class="metric-sub">Awaiting hospital verification</div>
+      </div>
       <div class="metric-card success" style="cursor:pointer;" onclick="switchHospitalTab('donors')">
         <div class="metric-title">Approved Donors</div>
         <div class="metric-value">${m.approvedDonors}</div>
@@ -386,12 +973,12 @@ function renderHospitalOverviewTab(container, summary) {
       <div class="metric-card warning" style="cursor:pointer;" onclick="switchHospitalTab('donors')">
         <div class="metric-title">Pending Screening</div>
         <div class="metric-value">${m.pendingScreenings}</div>
-        <div class="metric-sub">Awaiting appointment/decision</div>
+        <div class="metric-sub">Pre-donation checkups</div>
       </div>
-      <div class="metric-card critical" style="cursor:pointer;" onclick="switchHospitalTab('donors')">
+      <div class="metric-card success" style="cursor:pointer;" onclick="switchHospitalTab('donors')">
         <div class="metric-title">Available This Week</div>
         <div class="metric-value">${m.availableThisWeek}</div>
-        <div class="metric-sub">Confirmed via weekly check-in</div>
+        <div class="metric-sub">Confirmed via check-in</div>
       </div>
       <div class="metric-card ${m.nearExpiryUnits > 0 ? 'critical' : 'info'}" style="cursor:pointer;" onclick="switchHospitalTab('inventory')">
         <div class="metric-title">Near-Expiry Units</div>
@@ -400,16 +987,10 @@ function renderHospitalOverviewTab(container, summary) {
         </div>
         <div class="metric-sub">Expiring within 72 hours</div>
       </div>
-      <div class="metric-card ${m.urgentRequestsCount > 0 ? 'warning' : 'info'}" style="cursor:pointer;" onclick="switchHospitalTab('requests')">
-        <div class="metric-title">Urgent Requests</div>
-        <div class="metric-value">${m.urgentRequestsCount}</div>
-        <div class="metric-sub">Active matching required</div>
-      </div>
     </div>
 
     <!-- Charts & Tables Layout -->
     <div style="display:grid; grid-template-columns: 1.2fr 0.8fr; gap:20px; margin-bottom:20px;">
-      <!-- Stock by Blood Group -->
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">${Icons.bloodDrop(18)} Usable Stock by Blood Group</h3>
@@ -418,7 +999,6 @@ function renderHospitalOverviewTab(container, summary) {
         <div id="stockBarChartContainer"></div>
       </div>
 
-      <!-- Upcoming Screenings Card -->
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">${Icons.calendar(18)} Upcoming Screening Appointments</h3>
@@ -443,44 +1023,113 @@ function renderHospitalOverviewTab(container, summary) {
         `}
       </div>
     </div>
+  `;
 
-    <!-- Recent Urgent Requests Table -->
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">${Icons.alertTriangle(18, '#dc2626')} Active Urgent Blood Requests</h3>
-        <button class="btn btn-primary btn-sm" onclick="openCreateRequestModal()">+ New Request</button>
+  setTimeout(() => {
+    if (summary.stockByGroup) {
+      Charts.renderBarChart('stockBarChartContainer', summary.stockByGroup);
+    }
+  }, 50);
+}
+
+// Tab 2: Hospital Donor Application Management (Requirement 5)
+async function loadHospitalApplicationsTab(container) {
+  try {
+    const data = await API.getHospitalApplications();
+    renderHospitalApplicationsView(container, data.applications);
+  } catch (err) {
+    container.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load donor applications: ${err.message}</div>`;
+  }
+}
+
+function renderHospitalApplicationsView(container, apps) {
+  const pendingCount = apps.filter(a => a.status === 'PENDING_APPROVAL').length;
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+            ${Icons.shieldCheck(18, '#059669')} Donor Registration Applications
+            <span style="font-size:12px; font-weight:700; padding:2px 8px; border-radius:9999px; background:#fff1f2; color:#991b1b;">
+              ${pendingCount} Pending Review
+            </span>
+          </h3>
+          <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+            Authorised hospital staff review registration details before allowing applicants to activate accounts.
+          </p>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <input type="text" id="appSearchInput" class="form-control" style="width:200px;" placeholder="Search name, ID, phone..." onkeyup="filterApplicationsTable()" />
+          <select id="appStatusFilter" class="form-control" style="width:170px;" onchange="filterApplicationsTable()">
+            <option value="ALL">All Application Statuses</option>
+            <option value="PENDING_APPROVAL" selected>Pending Review (${pendingCount})</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+          </select>
+        </div>
       </div>
+    </div>
+
+    <div class="card">
       <div class="table-responsive">
-        <table class="data-table">
+        <table class="data-table" id="applicationsTable">
           <thead>
             <tr>
-              <th>Req ID</th>
-              <th>Group & Component</th>
-              <th>Units</th>
-              <th>Urgency</th>
+              <th>Application ID</th>
+              <th>Applicant Name</th>
+              <th>Group</th>
+              <th>Contact (Authorised)</th>
+              <th>Location</th>
+              <th>Submission Date</th>
               <th>Status</th>
-              <th>Required By</th>
-              <th>Actions</th>
+              <th>Actions / Review Log</th>
             </tr>
           </thead>
           <tbody>
-            ${summary.recentRequests.length === 0 ? `
-              <tr><td colspan="7" style="text-align:center; padding:20px;">No active blood requests recorded.</td></tr>
-            ` : summary.recentRequests.map(r => `
-              <tr>
-                <td><strong>#REQ-${r.id}</strong></td>
+            ${apps.length === 0 ? `
+              <tr><td colspan="8" style="text-align:center; padding:20px;">No applications found.</td></tr>
+            ` : apps.map(a => `
+              <tr data-name="${a.full_name.toLowerCase()}" data-id="${a.application_id.toLowerCase()}" data-mobile="${a.mobile}" data-status="${a.status}">
+                <td><code>${a.application_id}</code></td>
                 <td>
-                  <span class="blood-badge" style="width:26px; height:26px; font-size:11px; margin-right:6px;">${r.blood_group}</span>
-                  ${r.component}
+                  <strong>${a.full_name}</strong>
+                  <div style="font-size:11px; color:var(--text-muted);">${a.age}y / ${a.gender ? a.gender[0] : 'U'}</div>
                 </td>
-                <td><strong>${r.quantity_needed} units</strong></td>
-                <td><span class="status-badge ${r.urgency === 'CRITICAL' ? 'status-critical' : 'status-pending'}">${r.urgency}</span></td>
-                <td><span class="status-badge status-unconfirmed">${r.status}</span></td>
-                <td>${r.required_by}</td>
+                <td><span class="blood-badge" style="width:28px; height:28px; font-size:11px;">${a.blood_group}</span></td>
                 <td>
-                  <button class="btn btn-primary btn-sm" onclick="triggerSmartMatchingForRequest(${r.id})">
-                    ${Icons.sparkles(14, '#ffffff')} Smart Match
-                  </button>
+                  <div style="font-size:12px; font-weight:600;">${a.mobile}</div>
+                  <div style="font-size:11px; color:var(--text-muted);">${a.email || 'No email'}</div>
+                </td>
+                <td>${a.city} (${a.pincode})</td>
+                <td>${a.created_at ? a.created_at.slice(0, 10) : ''}</td>
+                <td>
+                  <span class="status-badge ${a.status === 'APPROVED' ? 'status-approved' : a.status === 'REJECTED' ? 'status-deferred' : 'status-pending'}">
+                    ${a.status}
+                  </span>
+                </td>
+                <td>
+                  ${a.status === 'PENDING_APPROVAL' ? `
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn btn-success btn-sm" onclick="handleApproveApplication(${a.id}, '${a.full_name}', '${a.application_id}')">
+                        Approve
+                      </button>
+                      <button class="btn btn-danger btn-sm" onclick="openRejectApplicationModal(${a.id}, '${a.full_name}', '${a.application_id}')">
+                        Reject
+                      </button>
+                    </div>
+                  ` : a.status === 'APPROVED' ? `
+                    <div style="font-size:11px; color:var(--status-green);">
+                      ✓ Approved by ${a.reviewed_by_staff_name || 'Staff'}<br/>
+                      <span style="color:var(--text-muted);">${a.reviewed_at ? a.reviewed_at.slice(0, 10) : ''}</span>
+                    </div>
+                  ` : `
+                    <div style="font-size:11px; color:var(--status-red);">
+                      ✕ Rejected: ${a.rejection_reason || 'Criteria not met'}<br/>
+                      <span style="color:var(--text-muted);">${a.reviewed_at ? a.reviewed_at.slice(0, 10) : ''}</span>
+                    </div>
+                  `}
                 </td>
               </tr>
             `).join('')}
@@ -490,15 +1139,89 @@ function renderHospitalOverviewTab(container, summary) {
     </div>
   `;
 
-  // Render Bar chart after DOM injection
-  setTimeout(() => {
-    if (summary.stockByGroup) {
-      Charts.renderBarChart('stockBarChartContainer', summary.stockByGroup);
-    }
-  }, 50);
+  // Apply default filter to show pending
+  filterApplicationsTable();
 }
 
-// Tab 2: Donor Management
+function filterApplicationsTable() {
+  const query = (document.getElementById('appSearchInput') ? document.getElementById('appSearchInput').value : '').toLowerCase();
+  const statusFilter = document.getElementById('appStatusFilter') ? document.getElementById('appStatusFilter').value : 'ALL';
+
+  const rows = document.querySelectorAll('#applicationsTable tbody tr');
+  rows.forEach(r => {
+    const name = r.getAttribute('data-name') || '';
+    const id = r.getAttribute('data-id') || '';
+    const mobile = r.getAttribute('data-mobile') || '';
+    const status = r.getAttribute('data-status') || '';
+
+    const matchQuery = !query || name.includes(query) || id.includes(query) || mobile.includes(query);
+    const matchStatus = statusFilter === 'ALL' || status === statusFilter;
+
+    if (matchQuery && matchStatus) {
+      r.style.display = '';
+    } else {
+      r.style.display = 'none';
+    }
+  });
+}
+
+async function handleApproveApplication(id, name, appId) {
+  try {
+    const res = await API.approveDonorApplication(id, AppState.activeHospital ? AppState.activeHospital.name : 'Chief Medical Officer');
+    showToast(`Application ${appId} for ${name} APPROVED! Account activation permitted.`);
+    loadHospitalDashboard();
+  } catch (err) {
+    showToast('Failed to approve application: ' + err.message, 'error');
+  }
+}
+
+function openRejectApplicationModal(id, name, appId) {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="closeModal(event)">
+      <div class="modal-box" style="max-width:480px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 style="font-size:16px; font-weight:800; color:#dc2626;">Reject Donor Application</h3>
+          <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+        </div>
+        <form onsubmit="handleRejectApplicationSubmit(event, ${id}, '${appId}')">
+          <div class="modal-body">
+            <p style="font-size:13px; margin-bottom:12px;">
+              Rejecting registration application for: <strong>${name}</strong> (<code>${appId}</code>)
+            </p>
+            <div class="form-group">
+              <label class="form-label">Reason for Rejection *</label>
+              <textarea name="rejectionReason" class="form-control" rows="3" required placeholder="State clear medical, identity, or service jurisdiction reason..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-danger">Confirm Rejection</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+async function handleRejectApplicationSubmit(e, id, appId) {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const reason = formData.get('rejectionReason');
+
+  try {
+    const res = await API.rejectDonorApplication(id, reason, AppState.activeHospital ? AppState.activeHospital.name : 'Hospital Staff');
+    closeModal();
+    showToast(res.message);
+    loadHospitalDashboard();
+  } catch (err) {
+    showToast('Failed to reject application: ' + err.message, 'error');
+  }
+}
+
+// Tab 3: Donor Management (Registry & Medical Screening)
 async function loadDonorManagementTab(container) {
   try {
     const data = await API.getDonors();
@@ -525,13 +1248,12 @@ function renderDonorManagementView(container, donors) {
             <option value="AB+">AB+</option>
             <option value="AB-">AB-</option>
           </select>
-          <select id="donorStatusFilter" class="form-control" style="width:180px;" onchange="filterDonorsTable()">
-            <option value="ALL">All Screening Statuses</option>
-            <option value="APPROVED">APPROVED</option>
-            <option value="PENDING SCREENING">PENDING SCREENING</option>
-            <option value="APPOINTMENT SCHEDULED">APPOINTMENT SCHEDULED</option>
-            <option value="TEMPORARILY DEFERRED">TEMPORARILY DEFERRED</option>
-            <option value="PENDING VERIFICATION">PENDING VERIFICATION</option>
+          <select id="donorStatusFilter" class="form-control" style="width:200px;" onchange="filterDonorsTable()">
+            <option value="ALL">All Medical Statuses</option>
+            <option value="MEDICALLY_APPROVED">MEDICALLY APPROVED</option>
+            <option value="PENDING_SCREENING">PENDING SCREENING</option>
+            <option value="APPOINTMENT_SCHEDULED">APPOINTMENT SCHEDULED</option>
+            <option value="TEMPORARILY_DEFERRED">TEMPORARILY DEFERRED</option>
           </select>
         </div>
         <div style="display:flex; gap:10px;">
@@ -550,8 +1272,8 @@ function renderDonorManagementView(container, donors) {
 
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">${Icons.users(18)} Hospital Donor Registry (${donors.length} records)</h3>
-        <span style="font-size:12px; color:var(--text-muted);">Authorised medical access</span>
+        <h3 class="card-title">${Icons.users(18)} Hospital Verified Donor Registry (${donors.length} records)</h3>
+        <span style="font-size:12px; color:var(--text-muted);">Authorised medical staff access only</span>
       </div>
       <div class="table-responsive">
         <table class="data-table" id="donorRegistryTable">
@@ -562,17 +1284,18 @@ function renderDonorManagementView(container, donors) {
               <th>Age/Sex</th>
               <th>Contact (Authorised)</th>
               <th>Location</th>
-              <th>Screening Status</th>
+              <th>Registration</th>
+              <th>Medical Fitness</th>
               <th>Weekly Avail.</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             ${donors.map(d => `
-              <tr data-name="${d.full_name.toLowerCase()}" data-mobile="${d.mobile}" data-bg="${d.blood_group}" data-status="${d.screening_status}">
+              <tr data-name="${d.full_name.toLowerCase()}" data-mobile="${d.mobile}" data-bg="${d.blood_group}" data-status="${d.medical_screening_status || d.screening_status}">
                 <td>
                   <strong style="color:var(--navy-dark);">${d.full_name}</strong>
-                  <div style="font-size:11px; color:var(--text-muted);">ID: #DNR-${d.id} • ${d.source || 'SELF'}</div>
+                  <div style="font-size:11px; color:var(--text-muted);">ID: #DNR-${d.id} • ${d.source || 'ONLINE'}</div>
                 </td>
                 <td><span class="blood-badge" style="width:30px; height:30px; font-size:12px;">${d.blood_group}</span></td>
                 <td>${d.age}y / ${d.gender ? d.gender[0] : 'U'}</td>
@@ -585,10 +1308,15 @@ function renderDonorManagementView(container, donors) {
                   <div style="font-size:11px; color:var(--text-muted);">PIN: ${d.pincode}</div>
                 </td>
                 <td>
-                  <span class="status-badge ${getScreeningStatusClass(d.screening_status)}">
-                    ${d.screening_status}
+                  <span class="status-badge status-approved">
+                    ${d.registration_status || 'APPROVED'}
                   </span>
-                  ${d.screening_valid_until ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Valid to: ${d.screening_valid_until}</div>` : ''}
+                </td>
+                <td>
+                  <span class="status-badge ${getMedicalStatusClass(d.medical_screening_status || d.screening_status)}">
+                    ${d.medical_screening_status || d.screening_status}
+                  </span>
+                  ${d.screening_valid_until ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Cleared to: ${d.screening_valid_until}</div>` : ''}
                 </td>
                 <td>
                   <span class="status-badge ${getAvailabilityStatusClass(d.weekly_availability)}">
@@ -597,18 +1325,11 @@ function renderDonorManagementView(container, donors) {
                 </td>
                 <td>
                   <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                    ${d.screening_status === 'PENDING SCREENING' || d.screening_status === 'PENDING VERIFICATION' ? `
-                      <button class="btn btn-secondary btn-sm" onclick="openScheduleScreeningModal(${d.id}, '${d.full_name}')" title="Schedule pre-donation checkup">
-                        ${Icons.calendar(12)} Schedule
-                      </button>
-                    ` : ''}
-                    ${d.screening_status === 'APPOINTMENT SCHEDULED' || d.screening_status === 'PENDING SCREENING' ? `
-                      <button class="btn btn-primary btn-sm" onclick="openRecordDecisionModal(${d.id}, '${d.full_name}')" title="Screen and approve or defer">
-                        ${Icons.shieldCheck(12, '#ffffff')} Decide
-                      </button>
-                    ` : ''}
-                    <button class="btn btn-secondary btn-sm" onclick="switchToDonor(${d.id})">
-                      Portal
+                    <button class="btn btn-secondary btn-sm" onclick="openScheduleScreeningModal(${d.id}, '${d.full_name}')" title="Schedule pre-donation checkup">
+                      ${Icons.calendar(12)} Schedule
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="openRecordDecisionModal(${d.id}, '${d.full_name}')" title="Record clinical fitness decision">
+                      ${Icons.shieldCheck(12, '#ffffff')} Screen
                     </button>
                   </div>
                 </td>
@@ -635,7 +1356,7 @@ function filterDonorsTable() {
 
     const matchQuery = !query || name.includes(query) || mobile.includes(query);
     const matchBg = bgFilter === 'ALL' || bg === bgFilter;
-    const matchStatus = statusFilter === 'ALL' || status === statusFilter;
+    const matchStatus = statusFilter === 'ALL' || status === statusFilter || (statusFilter === 'MEDICALLY_APPROVED' && status === 'APPROVED');
 
     if (matchQuery && matchBg && matchStatus) {
       r.style.display = '';
@@ -645,10 +1366,10 @@ function filterDonorsTable() {
   });
 }
 
-function getScreeningStatusClass(status) {
-  if (status === 'APPROVED') return 'status-approved';
-  if (status === 'APPOINTMENT SCHEDULED' || status === 'PENDING SCREENING') return 'status-pending';
-  if (status === 'TEMPORARILY DEFERRED' || status === 'NOT APPROVED') return 'status-deferred';
+function getMedicalStatusClass(status) {
+  if (status === 'APPROVED' || status === 'MEDICALLY_APPROVED') return 'status-approved';
+  if (status === 'APPOINTMENT SCHEDULED' || status === 'APPOINTMENT_SCHEDULED' || status === 'PENDING SCREENING' || status === 'PENDING_SCREENING') return 'status-pending';
+  if (status === 'TEMPORARILY DEFERRED' || status === 'TEMPORARILY_DEFERRED' || status === 'NOT APPROVED' || status === 'NOT_APPROVED') return 'status-deferred';
   return 'status-unconfirmed';
 }
 
@@ -659,10 +1380,10 @@ function getAvailabilityStatusClass(status) {
   return 'status-unconfirmed';
 }
 
-// Tab 3: Inventory
+// Tab 4: Inventory
 async function loadInventoryTab(container) {
   try {
-    const data = await API.getInventory(AppState.activeHospital.id);
+    const data = await API.getInventory(AppState.activeHospital ? AppState.activeHospital.id : 1);
     renderInventoryView(container, data);
   } catch (err) {
     container.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load inventory: ${err.message}</div>`;
@@ -671,7 +1392,6 @@ async function loadInventoryTab(container) {
 
 function renderInventoryView(container, invData) {
   container.innerHTML = `
-    <!-- Shelf-life & Regulatory Rule Banner -->
     <div class="card" style="background:#f0fdf4; border:1px solid #bbf7d0; margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <div>
@@ -688,7 +1408,6 @@ function renderInventoryView(container, invData) {
       </div>
     </div>
 
-    <!-- Inventory Stats Cards -->
     <div class="summary-grid" style="margin-bottom:20px;">
       <div class="metric-card success">
         <div class="metric-title">Usable Blood Units</div>
@@ -707,7 +1426,6 @@ function renderInventoryView(container, invData) {
       </div>
     </div>
 
-    <!-- Inventory Batch Table -->
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">${Icons.bloodDrop(18)} Batch Inventory Records</h3>
@@ -771,10 +1489,10 @@ function renderInventoryView(container, invData) {
   `;
 }
 
-// Tab 4: Requests & Matching (DEMO 6)
+// Tab 5: Requests & Matching (DEMO 6)
 async function loadRequestsTab(container) {
   try {
-    const data = await API.getBloodRequests(AppState.activeHospital.id);
+    const data = await API.getBloodRequests(AppState.activeHospital ? AppState.activeHospital.id : 1);
     renderRequestsView(container, data.requests);
   } catch (err) {
     container.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load blood requests: ${err.message}</div>`;
@@ -797,7 +1515,6 @@ function renderRequestsView(container, requests) {
       </div>
     </div>
 
-    <!-- Active Requests Grid -->
     <div style="display:flex; flex-direction:column; gap:16px;">
       ${requests.map(req => `
         <div class="card" style="border-left:4px solid ${req.urgency === 'CRITICAL' ? 'var(--blood-accent)' : '#d97706'};">
@@ -826,7 +1543,6 @@ function renderRequestsView(container, requests) {
             </div>
           ` : ''}
 
-          <!-- Matching Results Container (injected dynamically when triggered) -->
           <div id="matchingResults_${req.id}"></div>
         </div>
       `).join('')}
@@ -880,7 +1596,6 @@ function renderMatchingResultsInline(requestId, data) {
         </div>
       </div>
 
-      <!-- Ranked Donors List -->
       ${m.rankedDonors.length === 0 ? `
         <div style="padding:16px; background:#fffbeb; border:1px solid #fef3c7; border-radius:var(--radius-sm); font-size:12px; color:#92400e;">
           No matching donors found within ${m.radiusKm} km radius. Try expanding search radius to 50 km or reviewing deferred donor records.
@@ -933,7 +1648,7 @@ async function simulateContactDonor(requestId, donorId, donorName) {
   try {
     const res = await API.contactDonorSimulation(requestId, {
       donorId,
-      hospitalId: AppState.activeHospital.id,
+      hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
       notes: `Automated urgent mobilisation dispatched to ${donorName}.`
     });
     showToast(res.message);
@@ -943,7 +1658,7 @@ async function simulateContactDonor(requestId, donorId, donorName) {
   }
 }
 
-// Tab 5: AI Shortage Prediction (DEMO 5)
+// Tab 6: AI Shortage Prediction (DEMO 5)
 async function loadAiPredictionTab(container) {
   container.innerHTML = `
     <div class="card" style="margin-bottom:16px;">
@@ -976,7 +1691,6 @@ async function loadAiPredictionTab(container) {
       </div>
     </div>
 
-    <!-- AI Results Dynamic Container -->
     <div id="aiForecastResultsContainer">
       <div style="text-align:center; padding:30px; color:var(--text-muted);">Running initial forecast...</div>
     </div>
@@ -995,7 +1709,7 @@ async function runAiForecastModel() {
   container.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">Loading mathematical regression model weights for ${bg} ${comp}...</div>`;
 
   try {
-    const data = await API.getDemandForecast(AppState.activeHospital.id, bg, comp);
+    const data = await API.getDemandForecast(AppState.activeHospital ? AppState.activeHospital.id : 1, bg, comp);
     renderAiForecastContent(container, data);
   } catch (err) {
     container.innerHTML = `<div class="card" style="color:var(--status-red);">Model prediction failed: ${err.message}</div>`;
@@ -1006,7 +1720,6 @@ function renderAiForecastContent(container, f) {
   const m = f.modelMetrics;
 
   container.innerHTML = `
-    <!-- Top Comparison Metrics Grid -->
     <div class="summary-grid" style="margin-bottom:20px;">
       <div class="metric-card info">
         <div class="metric-title">Usable Stock In Bank</div>
@@ -1032,12 +1745,11 @@ function renderAiForecastContent(container, f) {
       </div>
     </div>
 
-    <!-- Main Forecast Chart Card -->
     <div class="card">
       <div class="card-header">
         <div>
           <h3 class="card-title">${Icons.activity(18, '#dc2626')} 7-Day Demand Forecast with 90% Confidence Corridor</h3>
-          <p style="font-size:11px; color:var(--text-muted);">Blue Line: Recent Historical Consumption • Red Dashed Line: ML Predicted Future Demand</p>
+          <p style="font-size:11px; color:var(--text-muted);">Blue Line: Historical Demand • Red Dashed Line: ML Predicted Future Demand</p>
         </div>
         <div>
           ${Charts.getRiskBadgeHtml(f.riskLevel)}
@@ -1046,9 +1758,7 @@ function renderAiForecastContent(container, f) {
       <div id="aiForecastChartSvgContainer" style="width:100%; min-height:240px;"></div>
     </div>
 
-    <!-- Explainable Factors & Clinical Recommendations -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-      <!-- Contributing Factors -->
       <div class="card">
         <h3 class="card-title" style="margin-bottom:12px;">
           ${Icons.sparkles(16, '#7c3aed')} Key Contributing Factors
@@ -1063,7 +1773,6 @@ function renderAiForecastContent(container, f) {
         </div>
       </div>
 
-      <!-- Clinical Coordination Recommendations -->
       <div class="card">
         <h3 class="card-title" style="margin-bottom:12px; color:var(--primary-red);">
           ${Icons.shieldCheck(16, '#991b1b')} AI Coordination Recommendations
@@ -1083,42 +1792,41 @@ function renderAiForecastContent(container, f) {
     </div>
   `;
 
-  // Render SVG chart
   setTimeout(() => {
     Charts.renderForecastChart('aiForecastChartSvgContainer', f.dailyForecast, f.recentHistory);
   }, 50);
 }
 
 // ============================================================================
-// 3. DONOR PORTAL VIEW (DEMO 4)
+// 7. DONOR PORTAL VIEW (Requirement 8, 10, 11)
 // ============================================================================
 function renderDonorPortal() {
   const d = AppState.activeDonor;
   if (!d) {
-    return `<div class="card" style="text-align:center; padding:40px;">No donor profile selected. Use quick switcher at top or register.</div>`;
+    return `<div class="card" style="text-align:center; padding:40px;">No donor session active. <a href="javascript:void(0)" onclick="navigateTo('donor-login')">Please log in</a>.</div>`;
   }
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
       <div style="display:flex; align-items:center; gap:14px;">
-        <span class="blood-badge" style="width:48px; height:48px; font-size:18px;">${d.blood_group}</span>
+        <span class="blood-badge" style="width:48px; height:48px; font-size:18px;">${d.bloodGroup || '🩸'}</span>
         <div>
-          <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">${d.full_name}</h2>
+          <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">${d.fullName}</h2>
           <p style="font-size:12px; color:var(--text-muted);">
-            Registered Donor • ${d.mobile} • ${d.city} (PIN: ${d.pincode})
+            Active Donor • Mobile: ${d.mobile} • ${d.city || 'Mumbai'}
           </p>
         </div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-secondary btn-sm" onclick="triggerSimulatedWeeklyPush()">
-          🔔 Trigger Weekly Push Notification
+          🔔 Test Weekly Availability Push
         </button>
       </div>
     </div>
 
     <!-- Active Tab Dynamic Container -->
     <div id="donorDashboardContent">
-      <div style="text-align:center; padding:30px; color:var(--text-muted);">Loading donor profile...</div>
+      <div style="text-align:center; padding:30px; color:var(--text-muted);">Loading verified donor profile...</div>
     </div>
   `;
 }
@@ -1131,7 +1839,7 @@ async function loadDonorDashboard() {
     const data = await API.getDonorPortalData(AppState.activeDonor.id);
     renderDonorDashboardContent(container, data);
   } catch (err) {
-    container.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load donor data: ${err.message}</div>`;
+    container.innerHTML = `<div class="card" style="color:var(--status-red);">Failed to load donor data: ${err.message}. Please log in again.</div>`;
   }
 }
 
@@ -1139,7 +1847,26 @@ function renderDonorDashboardContent(container, data) {
   const d = data.donor;
 
   container.innerHTML = `
-    <!-- Weekly Availability Check-in Card (WORKFLOW DEMO 4) -->
+    <!-- Separate Status Indicator Badges (Requirement 10) -->
+    <div class="card" style="margin-bottom:20px; background:#f8fafc;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <span style="font-size:11px; font-weight:700; color:var(--text-muted);">ACCOUNT STATUS</span>
+          <div style="margin-top:2px;">
+            <span class="status-badge status-approved">REGISTRATION: ${d.registrationStatus || 'APPROVED'}</span>
+            <span class="status-badge status-approved" style="margin-left:6px;">ACCOUNT: ${d.accountStatus || 'ACTIVE'}</span>
+            <span class="status-badge ${getMedicalStatusClass(d.medicalScreeningStatus || d.screening_status)}" style="margin-left:6px;">
+              MEDICAL FITNESS: ${d.medicalScreeningStatus || d.screening_status || 'PENDING_SCREENING'}
+            </span>
+          </div>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted);">
+          ${d.screening_valid_until ? `Cleared for blood donation until: <strong>${d.screening_valid_until}</strong>` : 'Medical fitness screening required before donation'}
+        </div>
+      </div>
+    </div>
+
+    <!-- Weekly Availability Check-in Card (WORKFLOW DEMO 4 & Requirement 11) -->
     <div class="availability-checkin-card">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
         <div>
@@ -1168,42 +1895,14 @@ function renderDonorDashboardContent(container, data) {
       </div>
     </div>
 
-    <!-- Medical Screening Status Card (WORKFLOW DEMO 3) -->
-    <div class="card" style="border-left:4px solid ${d.screening_status === 'APPROVED' ? 'var(--status-green)' : 'var(--status-amber)'};">
-      <div class="card-header">
-        <h3 class="card-title">${Icons.shieldCheck(18, d.screening_status === 'APPROVED' ? '#059669' : '#d97706')} Hospital Screening Status</h3>
-        <span class="status-badge ${getScreeningStatusClass(d.screening_status)}">${d.screening_status}</span>
-      </div>
-
-      ${d.screening_status === 'PENDING SCREENING' ? `
-        <div style="font-size:13px; color:var(--navy-slate); line-height:1.6;">
-          Thank you for registering! Your profile is currently <strong>PENDING SCREENING</strong>. The blood centre staff will review your registration and schedule an initial medical fitness checkup.
-        </div>
-      ` : d.screening_status === 'APPOINTMENT SCHEDULED' ? `
-        <div style="font-size:13px; color:var(--navy-slate); line-height:1.6;">
-          Your screening appointment has been scheduled by hospital medical staff! Please review the appointment details below and bring a valid photo ID.
-        </div>
-      ` : d.screening_status === 'APPROVED' ? `
-        <div style="font-size:13px; color:var(--navy-slate); line-height:1.6;">
-          You are an <strong>APPROVED</strong> donor in the active network.
-          ${d.screening_valid_until ? `<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Medical screening validity active until: <strong>${d.screening_valid_until}</strong></div>` : ''}
-        </div>
-      ` : `
-        <div style="font-size:13px; color:var(--navy-slate); line-height:1.6;">
-          Your current status is ${d.screening_status}. Please follow the advice of authorized clinical staff.
-        </div>
-      `}
-    </div>
-
     <!-- Appointments & Notifications Grid -->
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-      <!-- Appointments -->
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">${Icons.calendar(18)} Screening Appointments</h3>
+          <h3 class="card-title">${Icons.calendar(18)} Pre-Donation Screening Appointments</h3>
         </div>
         ${data.appointments.length === 0 ? `
-          <div style="font-size:12px; color:var(--text-muted); padding:20px; text-align:center;">No upcoming screening appointments scheduled.</div>
+          <div style="font-size:12px; color:var(--text-muted); padding:20px; text-align:center;">No upcoming screening appointments scheduled. Hospital staff will schedule checkups when slots are open.</div>
         ` : `
           <div style="display:flex; flex-direction:column; gap:10px;">
             ${data.appointments.map(a => `
@@ -1226,10 +1925,9 @@ function renderDonorDashboardContent(container, data) {
         `}
       </div>
 
-      <!-- Notifications -->
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">${Icons.bell(18)} Hospital Alerts & Messages (${data.unreadCount} unread)</h3>
+          <h3 class="card-title">${Icons.bell(18)} Notifications & Alerts (${data.unreadCount} unread)</h3>
         </div>
         ${data.notifications.length === 0 ? `
           <div style="font-size:12px; color:var(--text-muted); padding:20px; text-align:center;">No notifications yet.</div>
@@ -1239,7 +1937,7 @@ function renderDonorDashboardContent(container, data) {
               <div style="background:${n.is_read ? 'var(--bg-subtle)' : '#fff1f2'}; padding:10px; border-radius:var(--radius-sm); border:1px solid ${n.is_read ? 'var(--border-color)' : '#fca5a5'};">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <strong style="font-size:12px; color:var(--navy-dark);">${n.title}</strong>
-                  <span style="font-size:10px; color:var(--text-light);">${n.created_at.slice(0, 10)}</span>
+                  <span style="font-size:10px; color:var(--text-light);">${n.created_at ? n.created_at.slice(0, 10) : ''}</span>
                 </div>
                 <div style="font-size:11px; color:var(--navy-slate); margin-top:2px;">${n.message}</div>
               </div>
@@ -1255,7 +1953,7 @@ async function submitWeeklyAvailability(donorId, status) {
   try {
     const res = await API.updateWeeklyAvailability(donorId, status);
     AppState.activeDonor.weekly_availability = status;
-    showToast(`Weekly availability saved: ${status}`);
+    showToast(`Weekly availability recorded: ${status}`);
     renderApp();
   } catch (err) {
     showToast('Failed to update availability: ' + err.message, 'error');
@@ -1263,10 +1961,10 @@ async function submitWeeklyAvailability(donorId, status) {
 }
 
 // ============================================================================
-// MODAL WORKFLOWS (DEMO 1, 2, 3, 6, 7)
+// MODALS & REGISTRATION (Requirement 3, 5, 6, 7)
 // ============================================================================
 
-// DEMO 1: Donor Self-Registration
+// DEMO 1: Donor Registration Application
 function openDonorRegisterModal() {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -1276,7 +1974,7 @@ function openDonorRegisterModal() {
       <div class="modal-box" onclick="event.stopPropagation()">
         <div class="modal-header">
           <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
-            ${Icons.bloodDrop(20, '#dc2626')} Donor Self-Registration
+            ${Icons.bloodDrop(20, '#dc2626')} Apply to Become a Blood Donor
           </h3>
           <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
         </div>
@@ -1361,7 +2059,7 @@ function openDonorRegisterModal() {
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Complete Registration</button>
+            <button type="submit" class="btn btn-primary">Submit Application</button>
           </div>
         </form>
       </div>
@@ -1384,18 +2082,19 @@ async function handleDonorRegisterSubmit(e) {
   const payload = Object.fromEntries(formData.entries());
 
   try {
-    const res = await API.donorRegister(payload);
+    const res = await API.submitDonorApplication(payload);
     closeModal();
     showToast(res.message);
-    AppState.activeDonor = res.donor;
-    AppState.currentView = 'donor';
-    renderApp();
+    navigateTo('track-status');
+    setTimeout(() => {
+      fillStatusTrackerDemo(res.applicationId, payload.mobile);
+    }, 100);
   } catch (err) {
     showToast('Registration error: ' + err.message, 'error');
   }
 }
 
-// DEMO 2: Excel / CSV Importer Modal
+// Excel Import Modal
 function openExcelImportModal() {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -1469,7 +2168,6 @@ function renderExcelAnalysisPreview(a) {
   window.lastExcelInvalidRows = [...a.invalidRows, ...a.duplicateRows];
 
   preview.innerHTML = `
-    <!-- Summary Metrics -->
     <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:14px;">
       <div style="background:var(--bg-subtle); padding:10px; border-radius:var(--radius-sm); text-align:center;">
         <div style="font-size:11px; color:var(--text-muted);">Total Rows</div>
@@ -1489,7 +2187,6 @@ function renderExcelAnalysisPreview(a) {
       </div>
     </div>
 
-    <!-- Valid Rows Preview Table -->
     <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Valid Donors Ready for Import:</div>
     <div class="table-responsive" style="max-height:160px; overflow-y:auto; margin-bottom:14px;">
       <table class="data-table">
@@ -1516,7 +2213,6 @@ function renderExcelAnalysisPreview(a) {
       </table>
     </div>
 
-    <!-- Action Bar -->
     <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--border-color);">
       <div>
         ${a.invalidCount > 0 || a.duplicateCount > 0 ? `
@@ -1539,7 +2235,7 @@ async function confirmExcelImportExecution() {
   }
 
   try {
-    const res = await API.confirmExcelImport(window.lastExcelValidRows, AppState.activeHospital.id);
+    const res = await API.confirmExcelImport(window.lastExcelValidRows, AppState.activeHospital ? AppState.activeHospital.id : 1);
     closeModal();
     showToast(res.message);
     loadHospitalDashboard();
@@ -1553,7 +2249,11 @@ async function downloadImportErrorReport() {
   try {
     const res = await fetch('/api/hospital/excel/error-report', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(API.getToken() ? { 'Authorization': `Bearer ${API.getToken()}` } : {})
+      },
       body: JSON.stringify({ invalidRows: window.lastExcelInvalidRows })
     });
     const blob = await res.blob();
@@ -1567,7 +2267,7 @@ async function downloadImportErrorReport() {
   }
 }
 
-// DEMO 3: Schedule Screening Modal
+// Screening Schedule & Decision Modals
 function openScheduleScreeningModal(donorId, donorName) {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -1618,7 +2318,7 @@ async function handleScheduleScreeningSubmit(e, donorId) {
   const formData = new FormData(e.target);
   const payload = {
     donorId,
-    hospitalId: AppState.activeHospital.id,
+    hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
     appointmentDate: formData.get('appointmentDate'),
     appointmentTime: formData.get('appointmentTime'),
     instructions: formData.get('instructions')
@@ -1634,7 +2334,6 @@ async function handleScheduleScreeningSubmit(e, donorId) {
   }
 }
 
-// DEMO 3: Record Screening Decision Modal (Approve / Defer / Reject)
 function openRecordDecisionModal(donorId, donorName) {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -1657,7 +2356,7 @@ function openRecordDecisionModal(donorId, donorName) {
             <div class="form-group">
               <label class="form-label">Medical Decision Outcome *</label>
               <select name="status" class="form-control" required id="decisionSelect" onchange="toggleDeferralFields(this)">
-                <option value="APPROVED">APPROVED (Fit for Blood Donation)</option>
+                <option value="APPROVED">MEDICALLY APPROVED (Fit for Blood Donation)</option>
                 <option value="TEMPORARILY DEFERRED">TEMPORARILY DEFERRED (Clinical Delay)</option>
                 <option value="NOT APPROVED">NOT APPROVED (Ineligible)</option>
               </select>
@@ -1708,7 +2407,7 @@ async function handleScreeningDecisionSubmit(e, donorId) {
   const formData = new FormData(e.target);
   const payload = {
     donorId,
-    hospitalId: AppState.activeHospital.id,
+    hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
     status: formData.get('status'),
     staffName: formData.get('staffName'),
     staffNotes: formData.get('staffNotes'),
@@ -1799,7 +2498,7 @@ async function handleManualDonorSubmit(e) {
   }
 }
 
-// DEMO 7: Add Stock Modal
+// Add Stock Modal
 function openAddStockModal() {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -1868,7 +2567,7 @@ async function handleAddStockSubmit(e) {
   e.preventDefault();
   const formData = new FormData(e.target);
   const payload = {
-    hospitalId: AppState.activeHospital.id,
+    hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
     bloodGroup: formData.get('bloodGroup'),
     component: formData.get('component'),
     quantityUnits: formData.get('quantityUnits'),
@@ -1929,7 +2628,7 @@ async function handleIssueStockSubmit(e, invId) {
     inventoryId: invId,
     quantity: formData.get('quantity'),
     reason: formData.get('reason'),
-    hospitalId: AppState.activeHospital.id
+    hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1
   };
 
   try {
@@ -1942,7 +2641,7 @@ async function handleIssueStockSubmit(e, invId) {
   }
 }
 
-// Create Urgent Request Modal (DEMO 6)
+// Create Urgent Request Modal
 function openCreateRequestModal() {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -2022,7 +2721,7 @@ async function handleCreateRequestSubmit(e) {
   e.preventDefault();
   const formData = new FormData(e.target);
   const payload = {
-    hospitalId: AppState.activeHospital.id,
+    hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
     bloodGroup: formData.get('bloodGroup'),
     component: formData.get('component'),
     quantityNeeded: formData.get('quantityNeeded'),
@@ -2045,7 +2744,7 @@ async function handleCreateRequestSubmit(e) {
   }
 }
 
-// Simulated Weekly Push Notification Banner (WORKFLOW DEMO 4)
+// Simulated Weekly Push Notification Banner
 function triggerSimulatedWeeklyPush() {
   const container = document.getElementById('modalContainer');
   if (!container) return;
@@ -2053,7 +2752,6 @@ function triggerSimulatedWeeklyPush() {
   container.innerHTML = `
     <div class="modal-overlay" onclick="closeModal(event)">
       <div class="modal-box" style="max-width:440px; border-radius:24px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
-        <!-- Simulated Mobile Lockscreen Push Card -->
         <div style="background:#0f172a; color:#ffffff; padding:16px 20px; border-top-left-radius:24px; border-top-right-radius:24px; display:flex; justify-content:space-between; align-items:center;">
           <div style="display:flex; align-items:center; gap:8px;">
             ${Icons.bloodDrop(18, '#dc2626')}
@@ -2089,11 +2787,11 @@ function triggerSimulatedWeeklyPush() {
 
 async function handleNotificationChoice(choice) {
   closeModal();
-  if (!AppState.activeDonor) {
-    showToast('Switched to donor response: ' + choice);
-    return;
+  if (AppState.activeDonor) {
+    await submitWeeklyAvailability(AppState.activeDonor.id, choice);
+  } else {
+    showToast(`Weekly availability recorded: ${choice}`);
   }
-  await submitWeeklyAvailability(AppState.activeDonor.id, choice);
 }
 
 function closeModal(event) {
