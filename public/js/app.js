@@ -389,29 +389,17 @@ function renderDonorLoginPage() {
           </button>
         </form>
 
-        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); font-size:12px; display:flex; flex-direction:column; gap:10px;">
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); font-size:13px; display:flex; flex-direction:column; gap:10px; text-align:center;">
           <div>
-            Approved by hospital but haven't set a password?
-            <a href="javascript:void(0)" onclick="openActivationModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
-              Activate My Account →
+            Haven't registered yet?
+            <a href="javascript:void(0)" onclick="openDonorRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
+              Register to Be a Donor
             </a>
           </div>
           <div>
             Want to check your registration review status?
             <a href="javascript:void(0)" onclick="navigateTo('track-status')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
-              Track Application Status →
-            </a>
-          </div>
-          <div>
-            Haven't registered yet?
-            <a href="javascript:void(0)" onclick="openDonorRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
-              Apply to Become a Donor →
-            </a>
-          </div>
-          <div style="border-top:1px dashed var(--border-color); padding-top:8px;">
-            Are you healthcare or hospital staff?
-            <a href="javascript:void(0)" onclick="navigateTo('hospital-login')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
-              Hospital Staff Login →
+              Track Registration Status →
             </a>
           </div>
         </div>
@@ -488,28 +476,11 @@ function renderHospitalLoginPage() {
           </button>
         </form>
 
-        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); text-align:center; font-size:13px; display:flex; flex-direction:column; gap:10px;">
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); text-align:center; font-size:13px;">
           <div>
             Need to onboard your healthcare facility?
             <a href="javascript:void(0)" onclick="openHospitalRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
               Register Your Hospital
-            </a>
-          </div>
-          <div>
-            Approved hospital waiting for activation?
-            <a href="javascript:void(0)" onclick="openHospitalActivationModal()" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
-              Activate Hospital Account
-            </a>
-          </div>
-          <div style="border-top:1px dashed var(--border-color); padding-top:8px;">
-            Looking for donor services or tracking?
-            <a href="javascript:void(0)" onclick="navigateTo('donor-login')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
-              Donor Portal Login →
-            </a>
-          </div>
-          <div style="margin-top:4px;">
-            <a href="javascript:void(0)" onclick="openAdminPortalModal()" style="color:#64748b; font-size:12px; text-decoration:none;">
-              🏛️ Administrator Review Portal
             </a>
           </div>
         </div>
