@@ -45,6 +45,16 @@ function generateApplicationId() {
 }
 
 /**
+ * Generate unique human-readable Hospital Application ID
+ * Format: RS-HOSP-YYYYMMDD-XXXX (e.g. RS-HOSP-20261117-4821)
+ */
+function generateHospitalApplicationId() {
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `RS-HOSP-${dateStr}-${rand}`;
+}
+
+/**
  * Generate 6-digit numeric activation OTP
  */
 function generateActivationOtp() {
@@ -56,5 +66,6 @@ module.exports = {
   verifyPassword,
   generateSessionToken,
   generateApplicationId,
+  generateHospitalApplicationId,
   generateActivationOtp
 };

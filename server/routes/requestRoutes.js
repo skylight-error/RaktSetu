@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db/database');
 const { matchDonorsForRequest } = require('../ai/donorMatching');
+const { requireHospital } = require('../middleware/auth');
 
 /**
  * List all blood requests for hospital
+ * Protected: requires hospital authentication & ownership
  */
-router.get('/hospital/:hospitalId', (req, res) => {
-  const hospitalId = Number(req.params.hospitalId) || 1;
+router.get('/hospital/:hospitalId', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
   const requests = db.prepare(`
     SELECT r.*, h.name as hospital_name
     FROM blood_requests r
@@ -22,11 +24,12 @@ router.get('/hospital/:hospitalId', (req, res) => {
 /**
  * Create new blood request (Workflow DEMO 6 Step 1)
  */
-router.post('/create', (req, res) => {
-  const { hospitalId, bloodGroup, component, quantityNeeded, urgency, requiredBy, notes } = req.body;
+router.post('/create', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
+  const { bloodGroup, component, quantityNeeded, urgency, requiredBy, notes } = req.body;
 
-  if (!hospitalId || !bloodGroup || !component || !quantityNeeded) {
-    return res.status(400).json({ error: 'Hospital, blood group, component, and quantity are required.' });
+  if (!bloodGroup || !component || !quantityNeeded) {
+    return res.status(400).json({ error: 'Blood group, component, and quantity are required.' });
   }
 
   try {
@@ -59,13 +62,17 @@ router.post('/create', (req, res) => {
 /**
  * Run AI Smart Donor Matching for a blood request (Workflow 11 & DEMO 6)
  */
-router.get('/:requestId/match', (req, res) => {
+router.get('/:requestId/match', requireHospital, (req, res) => {
   const requestId = Number(req.params.requestId);
   const radiusKm = Number(req.query.radiusKm) || 25;
 
   const request = db.prepare('SELECT * FROM blood_requests WHERE id = ?').get(requestId);
   if (!request) {
     return res.status(404).json({ error: 'Blood request not found.' });
+  }
+
+  if (request.hospital_id !== req.hospital.id) {
+    return res.status(403).json({ error: 'Forbidden: You cannot access blood requests from another hospital.' });
   }
 
   // Update status to MATCHING IN PROGRESS if still NEW
@@ -95,18 +102,22 @@ router.get('/:requestId/match', (req, res) => {
 /**
  * Simulate contacting a prioritized donor (Workflow DEMO 6 Step 6)
  */
-router.post('/:requestId/contact-donor', (req, res) => {
+router.post('/:requestId/contact-donor', requireHospital, (req, res) => {
   const requestId = Number(req.params.requestId);
-  const { donorId, hospitalId, contactMethod, notes } = req.body;
+  const { donorId, contactMethod, notes } = req.body;
 
-  if (!donorId || !hospitalId) {
-    return res.status(400).json({ error: 'Donor ID and Hospital ID are required.' });
+  if (!donorId) {
+    return res.status(400).json({ error: 'Donor ID is required.' });
   }
 
   const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId);
   const request = db.prepare('SELECT * FROM blood_requests WHERE id = ?').get(requestId);
   if (!donor || !request) {
     return res.status(404).json({ error: 'Donor or Blood Request not found.' });
+  }
+
+  if (request.hospital_id !== req.hospital.id) {
+    return res.status(403).json({ error: 'Forbidden: You cannot contact donors on behalf of another hospital.' });
   }
 
   // 1. Record contact action in SQLite
@@ -116,7 +127,7 @@ router.post('/:requestId/contact-donor', (req, res) => {
   `).run(
     requestId,
     donorId,
-    hospitalId,
+    req.hospital.id,
     contactMethod || 'IN_APP_SIMULATION',
     notes || `Direct urgent outreach: ${request.blood_group} ${request.component}`
   );
@@ -142,9 +153,18 @@ router.post('/:requestId/contact-donor', (req, res) => {
 /**
  * Update request status (e.g. FULFILLED, CANCELLED)
  */
-router.patch('/:requestId/status', (req, res) => {
+router.patch('/:requestId/status', requireHospital, (req, res) => {
   const requestId = Number(req.params.requestId);
   const { status } = req.body;
+
+  const request = db.prepare('SELECT * FROM blood_requests WHERE id = ?').get(requestId);
+  if (!request) {
+    return res.status(404).json({ error: 'Blood request not found.' });
+  }
+
+  if (request.hospital_id !== req.hospital.id) {
+    return res.status(403).json({ error: 'Forbidden: You cannot modify blood requests from another hospital.' });
+  }
 
   const validStatuses = ['NEW', 'MATCHING IN PROGRESS', 'DONORS CONTACTED', 'RESPONSE RECEIVED', 'FULFILLED', 'CANCELLED'];
   if (!validStatuses.includes(status)) {

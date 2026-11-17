@@ -94,7 +94,8 @@ function requireDonor(req, res, next) {
  * Hospital Staff Authorization Middleware
  * Enforces:
  * 1. user_type must be 'HOSPITAL'
- * 2. Only hospital accounts can access hospital management endpoints
+ * 2. Hospital registration must be APPROVED and account must be ACTIVE
+ * 3. Strict hospital ownership: Hospital A cannot access Hospital B's records
  */
 function requireHospital(req, res, next) {
   requireAuth(req, res, () => {
@@ -108,9 +109,79 @@ function requireHospital(req, res, next) {
       return res.status(404).json({ error: 'Hospital account not found.' });
     }
 
+    if (hospital.registration_status !== 'APPROVED') {
+      return res.status(403).json({ error: `Access denied: Hospital registration status is ${hospital.registration_status}.` });
+    }
+
+    if (hospital.account_status !== 'ACTIVE') {
+      return res.status(403).json({ error: `Access denied: Hospital account is ${hospital.account_status}. Please complete activation.` });
+    }
+
+    // Strict ownership validation: prevents Hospital A from accessing/modifying Hospital B's data
+    const targetHospId = req.params.hospitalId || (req.query && req.query.hospitalId) || (req.body && req.body.hospitalId);
+    if (targetHospId && Number(targetHospId) !== hospital.id) {
+      return res.status(403).json({ error: "Forbidden: You are not authorized to view or modify another hospital's private records." });
+    }
+
     req.hospital = hospital;
     next();
   });
+}
+
+/**
+ * Platform Administrator Authorization Middleware
+ * Enforces:
+ * 1. user_type must be 'ADMIN'
+ * 2. Only platform administrators can review hospital applications
+ */
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.session.user_type !== 'ADMIN') {
+      return res.status(403).json({ error: 'Access denied: RaktSetu administrator authentication required.' });
+    }
+
+    const admin = db.prepare('SELECT id, username, email, full_name, role FROM administrators WHERE id = ?').get(req.session.user_id);
+    if (!admin) {
+      return res.status(404).json({ error: 'Administrator account not found.' });
+    }
+
+    req.admin = admin;
+    next();
+  });
+}
+
+// In-memory rate limiter for login attempts
+const loginAttempts = new Map();
+
+function loginRateLimiter(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+
+  if (record) {
+    if (now > record.resetAt) {
+      loginAttempts.delete(ip);
+    } else if (record.count >= 20) {
+      return res.status(429).json({ error: 'Too many failed login attempts. Please try again after 5 minutes.' });
+    }
+  }
+  next();
+}
+
+function recordFailedLogin(req) {
+  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + 5 * 60 * 1000 });
+  } else {
+    record.count++;
+  }
+}
+
+function resetLoginAttempts(req) {
+  const ip = req.ip || req.socket.remoteAddress || '127.0.0.1';
+  loginAttempts.delete(ip);
 }
 
 module.exports = {
@@ -118,5 +189,9 @@ module.exports = {
   getSessionToken,
   requireAuth,
   requireDonor,
-  requireHospital
+  requireHospital,
+  requireAdmin,
+  loginRateLimiter,
+  recordFailedLogin,
+  resetLoginAttempts
 };

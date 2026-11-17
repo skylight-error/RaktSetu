@@ -5,22 +5,254 @@ const {
   hashPassword,
   verifyPassword,
   generateSessionToken,
+  generateApplicationId,
+  generateHospitalApplicationId,
   generateActivationOtp
 } = require('../utils/crypto');
-const { getSessionToken, requireAuth } = require('../middleware/auth');
+const {
+  getSessionToken,
+  requireAuth,
+  loginRateLimiter,
+  recordFailedLogin,
+  resetLoginAttempts
+} = require('../middleware/auth');
 
 /**
- * Hospital Login (Requirement 9)
+ * Hospital Registration (Requirement 2)
  */
-router.post('/hospital/login', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Hospital email and password are required.' });
+router.post('/hospital/register', (req, res) => {
+  const { name, email, phone, address, city, pincode, password, confirmPassword } = req.body;
+
+  if (!name || !email || !phone || !address || !city || !pincode || !password) {
+    return res.status(400).json({ error: 'Hospital name, official email, contact number, address, city, PIN code, and password are required.' });
   }
 
-  const hospital = db.prepare('SELECT * FROM hospitals WHERE lower(email) = ?').get(email.trim().toLowerCase());
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+    return res.status(400).json({ error: 'Please enter a valid official hospital email address.' });
+  }
+
+  const cleanPhone = phone.toString().replace(/\D/g, '');
+  if (cleanPhone.length < 10) {
+    return res.status(400).json({ error: 'Please enter a valid 10-digit hospital contact number.' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  }
+
+  if (confirmPassword && password !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match. Please re-enter.' });
+  }
+
+  // Duplicate email check
+  const existing = db.prepare('SELECT id, name, registration_status FROM hospitals WHERE lower(email) = ?').get(cleanEmail);
+  if (existing) {
+    return res.status(400).json({
+      error: `A hospital registration with this official email already exists (${existing.name}). If your application is pending or approved, please track its status or proceed to login.`
+    });
+  }
+
+  const { hash, salt } = hashPassword(password);
+  const applicationId = generateHospitalApplicationId();
+  const activationOtp = generateActivationOtp();
+
+  try {
+    const insert = db.prepare(`
+      INSERT INTO hospitals (
+        name, email, phone, address, city, pincode, latitude, longitude,
+        password_hash, password_salt, application_id, registration_status,
+        account_status, activation_otp, activation_otp_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 19.0760, 72.8777, ?, ?, ?, 'PENDING_APPROVAL', 'NOT_ACTIVATED', ?, datetime('now', '+7 days'))
+    `);
+
+    const result = insert.run(
+      name.trim(),
+      cleanEmail,
+      phone.trim(),
+      address.trim(),
+      city.trim(),
+      pincode.trim(),
+      hash,
+      salt,
+      applicationId,
+      activationOtp
+    );
+
+    res.status(201).json({
+      success: true,
+      hospitalId: result.lastInsertRowid,
+      applicationId,
+      registrationStatus: 'PENDING_APPROVAL',
+      accountStatus: 'NOT_ACTIVATED',
+      message: `Hospital registration application submitted successfully! Your Application ID is ${applicationId}. Authorised RaktSetu administrators will review and verify your facility credentials before account activation.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to submit hospital registration: ' + err.message });
+  }
+});
+
+/**
+ * Request Hospital Account Activation Verification Code / OTP (Requirement 4)
+ */
+router.post('/hospital/request-activation-code', (req, res) => {
+  const { email, applicationId } = req.body;
+  const lookup = (email || applicationId || '').toString().trim().toLowerCase();
+
+  if (!lookup) {
+    return res.status(400).json({ error: 'Official email or Application ID is required.' });
+  }
+
+  const hosp = db.prepare(`
+    SELECT * FROM hospitals
+    WHERE lower(email) = ? OR lower(application_id) = ?
+  `).get(lookup, lookup);
+
+  if (!hosp) {
+    return res.status(404).json({ error: 'No hospital application found with matching email or application ID.' });
+  }
+
+  if (hosp.registration_status === 'PENDING_APPROVAL') {
+    return res.status(403).json({
+      error: `Your hospital application (${hosp.application_id || '#' + hosp.id}) is still PENDING APPROVAL by RaktSetu administration. Account activation is only permitted after administrator approval.`
+    });
+  }
+
+  if (hosp.registration_status === 'REJECTED') {
+    return res.status(403).json({
+      error: `Your hospital application was REJECTED and not approved. Reason: ${hosp.rejection_reason || 'Licensing accreditation requirement not met.'}`
+    });
+  }
+
+  if (hosp.account_status === 'ACTIVE') {
+    return res.status(400).json({
+      error: 'This hospital account is already active! Please proceed directly to Hospital Login.'
+    });
+  }
+
+  const otp = hosp.activation_otp || generateActivationOtp();
+  db.prepare(`
+    UPDATE hospitals
+    SET activation_otp = ?, activation_otp_expires_at = datetime('now', '+7 days')
+    WHERE id = ?
+  `).run(otp, hosp.id);
+
+  res.json({
+    success: true,
+    hospitalId: hosp.id,
+    hospitalName: hosp.name,
+    applicationId: hosp.application_id,
+    email: hosp.email,
+    demoOtpNotice: 'DEMO SIMULATION: Real SMS/email gateway is simulated for academic presentation.',
+    demoActivationOtp: otp,
+    activationCode: otp,
+    message: `Activation verification code generated for ${hosp.name}. Enter the 6-digit code to complete account activation.`
+  });
+});
+
+/**
+ * Complete First-Time Hospital Account Activation (Requirement 4)
+ */
+router.post('/hospital/activate', (req, res) => {
+  const { email, applicationId, password, confirmPassword } = req.body;
+  const activationCode = req.body.activationCode || req.body.otp || req.body.code;
+  const lookup = (email || applicationId || '').toString().trim().toLowerCase();
+
+  if (!lookup || !activationCode) {
+    return res.status(400).json({ error: 'Hospital email/application ID and activation verification code are required.' });
+  }
+
+  const hosp = db.prepare(`
+    SELECT * FROM hospitals
+    WHERE lower(email) = ? OR lower(application_id) = ?
+  `).get(lookup, lookup);
+
+  if (!hosp) {
+    return res.status(404).json({ error: 'Hospital not found.' });
+  }
+
+  if (hosp.registration_status !== 'APPROVED') {
+    return res.status(403).json({
+      error: `Cannot activate account. Hospital registration status is currently ${hosp.registration_status}. Activation is only allowed for APPROVED applications.`
+    });
+  }
+
+  if (!hosp.activation_otp || hosp.activation_otp.toString().trim() !== activationCode.toString().trim()) {
+    return res.status(400).json({ error: 'Invalid or expired activation code. Please check the code or request a new one.' });
+  }
+
+  // Update password if provided
+  if (password) {
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+    if (confirmPassword && password !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match.' });
+    }
+    const { hash, salt } = hashPassword(password);
+    db.prepare('UPDATE hospitals SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, hosp.id);
+  }
+
+  // Activate hospital account
+  db.prepare(`
+    UPDATE hospitals
+    SET account_status = 'ACTIVE',
+        activation_otp = NULL
+    WHERE id = ?
+  `).run(hosp.id);
+
+  res.json({
+    success: true,
+    message: `Hospital account for ${hosp.name} successfully activated! You can now log in using your official email and password.`
+  });
+});
+
+/**
+ * Hospital Login (Requirement 5)
+ */
+router.post('/hospital/login', loginRateLimiter, (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Hospital official email and password are required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const hospital = db.prepare('SELECT * FROM hospitals WHERE lower(email) = ?').get(cleanEmail);
   if (!hospital) {
+    recordFailedLogin(req);
     return res.status(401).json({ error: 'Invalid hospital email or password.' });
+  }
+
+  // Check Registration Status
+  if (hospital.registration_status === 'PENDING_APPROVAL') {
+    return res.status(403).json({
+      error: `Your hospital registration (${hospital.application_id || 'ID #' + hospital.id}) is currently PENDING approval by RaktSetu administration. You will be able to activate your account once approved.`,
+      registrationStatus: 'PENDING_APPROVAL',
+      accountStatus: hospital.account_status || 'NOT_ACTIVATED'
+    });
+  }
+
+  if (hospital.registration_status === 'REJECTED') {
+    return res.status(403).json({
+      error: `Your hospital registration application was not approved by administration. Reason: ${hospital.rejection_reason || 'Licensing accreditation review requirement not met.'}`,
+      registrationStatus: 'REJECTED'
+    });
+  }
+
+  // Check Account Status
+  if (hospital.account_status === 'NOT_ACTIVATED') {
+    return res.status(403).json({
+      error: `Your hospital registration has been APPROVED! However, your account has not been activated yet. Please complete First-Time Hospital Activation.`,
+      registrationStatus: 'APPROVED',
+      accountStatus: 'NOT_ACTIVATED'
+    });
+  }
+
+  if (hospital.account_status === 'DISABLED') {
+    return res.status(403).json({
+      error: 'Your hospital account has been disabled. Please contact RaktSetu administration.',
+      accountStatus: 'DISABLED'
+    });
   }
 
   // Verify password: support secure hash with salt, or legacy seed password
@@ -29,14 +261,16 @@ router.post('/hospital/login', (req, res) => {
     isValid = verifyPassword(password, hospital.password_hash, hospital.password_salt);
   } else if (hospital.password_hash === password) {
     isValid = true;
-    // Upgrade to secure hash automatically
     const { hash, salt } = hashPassword(password);
     db.prepare('UPDATE hospitals SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, hospital.id);
   }
 
   if (!isValid) {
+    recordFailedLogin(req);
     return res.status(401).json({ error: 'Invalid hospital email or password.' });
   }
+
+  resetLoginAttempts(req);
 
   // Create secure session token
   const token = generateSessionToken();
@@ -64,7 +298,65 @@ router.post('/hospital/login', (req, res) => {
       phone: hospital.phone,
       address: hospital.address,
       city: hospital.city,
-      pincode: hospital.pincode
+      pincode: hospital.pincode,
+      registrationStatus: hospital.registration_status,
+      accountStatus: hospital.account_status
+    }
+  });
+});
+
+/**
+ * Administrator Login (Requirement 3)
+ */
+router.post('/admin/login', loginRateLimiter, (req, res) => {
+  const { username, email, password } = req.body;
+  const loginId = (username || email || '').toString().trim().toLowerCase();
+
+  if (!loginId || !password) {
+    return res.status(400).json({ error: 'Administrator username/email and password are required.' });
+  }
+
+  const admin = db.prepare(`
+    SELECT * FROM administrators
+    WHERE lower(username) = ? OR lower(email) = ?
+  `).get(loginId, loginId);
+
+  if (!admin) {
+    recordFailedLogin(req);
+    return res.status(401).json({ error: 'Invalid administrator credentials.' });
+  }
+
+  const isValid = verifyPassword(password, admin.password_hash, admin.password_salt);
+  if (!isValid) {
+    recordFailedLogin(req);
+    return res.status(401).json({ error: 'Invalid administrator credentials.' });
+  }
+
+  resetLoginAttempts(req);
+
+  const token = generateSessionToken();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  db.prepare(`
+    INSERT INTO sessions (token, user_id, user_type, role, expires_at)
+    VALUES (?, ?, 'ADMIN', ?, ?)
+  `).run(token, admin.id, admin.role || 'SUPER_ADMIN', expiresAt);
+
+  res.setHeader(
+    'Set-Cookie',
+    `session_token=${token}; HttpOnly; Path=/; Max-Age=86400; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+  );
+
+  res.json({
+    success: true,
+    userType: 'ADMIN',
+    token,
+    admin: {
+      id: admin.id,
+      username: admin.username,
+      email: admin.email,
+      fullName: admin.full_name,
+      role: admin.role
     }
   });
 });
@@ -424,6 +716,21 @@ router.get('/me', (req, res) => {
       userType: 'HOSPITAL',
       token,
       user: hospital
+    });
+  } else if (session.user_type === 'ADMIN') {
+    const admin = db.prepare('SELECT id, username, email, full_name, role FROM administrators WHERE id = ?').get(session.user_id);
+    if (!admin) return res.json({ authenticated: false });
+    return res.json({
+      authenticated: true,
+      userType: 'ADMIN',
+      token,
+      user: {
+        id: admin.id,
+        username: admin.username,
+        email: admin.email,
+        fullName: admin.full_name,
+        role: admin.role
+      }
     });
   }
 

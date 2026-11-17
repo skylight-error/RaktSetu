@@ -2,12 +2,102 @@ const { db, initSchema } = require('./database');
 const { hashPassword } = require('../utils/crypto');
 
 function ensureApplicationsAndAccounts() {
-  // 1. Upgrade hospitals with secure password hashes
-  const hospitals = db.prepare('SELECT id, password_hash, password_salt FROM hospitals').all();
+  // 1. Ensure default platform administrator exists
+  const admin = db.prepare('SELECT id FROM administrators WHERE email = ?').get('admin@raktsetu.org');
+  if (!admin) {
+    const { hash, salt } = hashPassword('admin123');
+    db.prepare(`
+      INSERT INTO administrators (username, email, full_name, password_hash, password_salt, role)
+      VALUES ('admin', 'admin@raktsetu.org', 'RaktSetu System Administrator', ?, ?, 'SUPER_ADMIN')
+    `).run(hash, salt);
+  }
+
+  // 2. Upgrade hospitals with secure password hashes & status
+  const hospitals = db.prepare('SELECT id, password_hash, password_salt, registration_status, account_status, application_id FROM hospitals').all();
   hospitals.forEach(h => {
-    if (!h.password_salt || h.password_hash === 'hospital123') {
+    let pHash = h.password_hash;
+    let pSalt = h.password_salt;
+    if (!pSalt || pHash === 'hospital123') {
       const { hash, salt } = hashPassword('hospital123');
-      db.prepare('UPDATE hospitals SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, h.id);
+      pHash = hash;
+      pSalt = salt;
+    }
+    const regStatus = h.registration_status || 'APPROVED';
+    const accStatus = h.account_status || 'ACTIVE';
+    const appId = h.application_id || `RS-HOSP-SEEDED-${h.id}`;
+
+    db.prepare(`
+      UPDATE hospitals
+      SET password_hash = ?, password_salt = ?, registration_status = ?, account_status = ?, application_id = ?
+      WHERE id = ?
+    `).run(pHash, pSalt, regStatus, accStatus, appId, h.id);
+  });
+
+  // Ensure dedicated demo hospital applications exist for evaluation
+  const demoHospitals = [
+    {
+      appId: 'RS-HOSP-DEMO-PENDING',
+      name: 'Apex Specialty Care Hospital',
+      email: 'apex.hospital@demo.org',
+      phone: '+91 98200 11223',
+      address: 'S.V. Road, Bandra West',
+      city: 'Mumbai',
+      pincode: '400050',
+      regStatus: 'PENDING_APPROVAL',
+      accStatus: 'NOT_ACTIVATED',
+      pass: 'hospital123',
+      otp: '789123'
+    },
+    {
+      appId: 'RS-HOSP-DEMO-APPROVED',
+      name: 'Sunrise Multi-Specialty Blood Centre',
+      email: 'sunrise.blood@demo.org',
+      phone: '+91 98200 33445',
+      address: 'LBS Marg, Ghatkopar West',
+      city: 'Mumbai',
+      pincode: '400086',
+      regStatus: 'APPROVED',
+      accStatus: 'NOT_ACTIVATED',
+      pass: 'hospital123',
+      otp: '123456'
+    },
+    {
+      appId: 'RS-HOSP-DEMO-REJECTED',
+      name: 'Green Valley Community Clinic',
+      email: 'greenvalley@demo.org',
+      phone: '+91 98200 55667',
+      address: 'Station Road, Vikhroli',
+      city: 'Mumbai',
+      pincode: '400079',
+      regStatus: 'REJECTED',
+      accStatus: 'DISABLED',
+      rejectionReason: 'Hospital blood storage licensing accreditation could not be verified with state regulatory authorities.',
+      pass: 'hospital123',
+      otp: null
+    }
+  ];
+
+  demoHospitals.forEach(dh => {
+    const existing = db.prepare('SELECT id FROM hospitals WHERE email = ?').get(dh.email);
+    const { hash, salt } = hashPassword(dh.pass);
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO hospitals (
+          name, email, phone, address, city, pincode, latitude, longitude,
+          password_hash, password_salt, application_id, registration_status,
+          account_status, rejection_reason, activation_otp, activation_otp_expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 19.0760, 72.8777, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))
+      `).run(
+        dh.name, dh.email, dh.phone, dh.address, dh.city, dh.pincode,
+        hash, salt, dh.appId, dh.regStatus, dh.accStatus, dh.rejectionReason || null, dh.otp
+      );
+    } else {
+      db.prepare(`
+        UPDATE hospitals
+        SET application_id = ?, registration_status = ?, account_status = ?,
+            rejection_reason = ?, activation_otp = ?
+        WHERE id = ?
+      `).run(dh.appId, dh.regStatus, dh.accStatus, dh.rejectionReason || null, dh.otp, existing.id);
     }
   });
 

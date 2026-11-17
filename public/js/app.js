@@ -89,12 +89,14 @@ function renderApp() {
       </div>
       <div class="demo-shortcuts">
         <span style="color:#94a3b8; margin-right:4px;">Evaluation Shortcuts:</span>
-        <button class="demo-btn" onclick="demoLoginHospital(1)">🏥 Login Metro Hospital</button>
-        <button class="demo-btn" onclick="demoLoginDonor(1)">🩸 Login Rahul (Approved)</button>
+        <button class="demo-btn" onclick="demoLoginHospital(1)">🏥 Login Metro</button>
+        <button class="demo-btn" onclick="demoLoginDonor(1)">🩸 Login Rahul</button>
+        <button class="demo-btn" style="background:#0f766e;" onclick="openAdminPortalModal()">🏛️ Admin Review</button>
+        <button class="demo-btn" style="background:#2563eb;" onclick="openHospitalRegisterModal()">+ Register Hospital</button>
+        <button class="demo-btn" style="background:#0284c7;" onclick="openHospitalActivationModal('sunrise.blood@demo.org')">⚡ Hospital Activation</button>
         <button class="demo-btn" onclick="navigateTo('track-status')">📋 Track Status</button>
-        <button class="demo-btn" style="background:#7c3aed;" onclick="openActivationModal('DEMO-APP-APPROVED', '9811144455')">🚀 Test Activation</button>
+        <button class="demo-btn" style="background:#7c3aed;" onclick="openActivationModal('DEMO-APP-APPROVED', '9811144455')">🚀 Donor Activation</button>
         <button class="demo-btn" onclick="openDonorRegisterModal()">+ Register Donor</button>
-        <button class="demo-btn" style="background:#b91c1c;" onclick="triggerSimulatedWeeklyPush()">🔔 Test Weekly Push</button>
       </div>
     </div>
 
@@ -108,19 +110,8 @@ function renderApp() {
         </div>
       </div>
 
-      <div class="nav-links">
-        <button class="btn ${AppState.currentView === 'landing' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('landing')">
-          Home
-        </button>
-
-        <button class="btn ${AppState.currentView === 'track-status' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('track-status')">
-          ${Icons.activity(15)} Track Application
-        </button>
-
-        ${AppState.userType === 'DONOR' && AppState.activeDonor ? `
-          <button class="btn ${AppState.currentView === 'donor' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('donor')">
-            ${Icons.user(16)} My Donor Portal
-          </button>
+      ${AppState.userType === 'DONOR' && AppState.activeDonor ? `
+        <div style="display:flex; align-items:center; gap:12px;">
           <div class="user-badge" style="background:var(--primary-red-light); color:var(--primary-red); border:1px solid var(--primary-red-border);">
             <span class="blood-badge" style="width:22px; height:22px; font-size:10px;">${AppState.activeDonor.bloodGroup || '🩸'}</span>
             <span>${AppState.activeDonor.fullName || 'Donor'}</span>
@@ -128,10 +119,9 @@ function renderApp() {
           <button class="btn btn-secondary btn-sm" onclick="handleLogout()">
             ${Icons.logOut(15)} Logout
           </button>
-        ` : AppState.userType === 'HOSPITAL' && AppState.activeHospital ? `
-          <button class="btn ${AppState.currentView === 'hospital' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('hospital')">
-            ${Icons.hospital(16)} Hospital Portal
-          </button>
+        </div>
+      ` : AppState.userType === 'HOSPITAL' && AppState.activeHospital ? `
+        <div style="display:flex; align-items:center; gap:12px;">
           <div class="user-badge" style="background:#f1f5f9; color:var(--navy-dark); border:1px solid var(--border-color);">
             ${Icons.hospital(14)}
             <span>${AppState.activeHospital.name}</span>
@@ -139,18 +129,18 @@ function renderApp() {
           <button class="btn btn-secondary btn-sm" onclick="handleLogout()">
             ${Icons.logOut(15)} Logout
           </button>
-        ` : `
-          <button class="btn ${AppState.currentView === 'donor-login' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('donor-login')">
-            ${Icons.user(16)} Donor Login
+        </div>
+      ` : AppState.userType === 'ADMIN' && AppState.adminUser ? `
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="user-badge" style="background:#f0fdfa; color:#0f766e; border:1px solid #99f6e4;">
+            ${Icons.shield(14, '#0f766e')}
+            <span>${AppState.adminUser.fullName || 'Administrator'}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="handleLogout()">
+            ${Icons.logOut(15)} Logout
           </button>
-          <button class="btn ${AppState.currentView === 'hospital-login' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="navigateTo('hospital-login')">
-            ${Icons.hospital(16)} Hospital Login
-          </button>
-          <button class="btn btn-secondary btn-sm" style="color:var(--primary-red); border-color:var(--primary-red-border);" onclick="openDonorRegisterModal()">
-            Register as Donor
-          </button>
-        `}
-      </div>
+        </div>
+      ` : ''}
     </nav>
 
     <!-- Main View Container -->
@@ -374,19 +364,7 @@ function renderLandingPage() {
 // ============================================================================
 function renderDonorLoginPage() {
   return `
-    <div class="auth-wrapper">
-      <div class="auth-tabs">
-        <button class="auth-tab-btn active" onclick="navigateTo('donor-login')">
-          ${Icons.user(14)} Donor Login
-        </button>
-        <button class="auth-tab-btn" onclick="navigateTo('hospital-login')">
-          ${Icons.hospital(14)} Hospital Login
-        </button>
-        <button class="auth-tab-btn" onclick="navigateTo('track-status')">
-          ${Icons.activity(14)} Track Status
-        </button>
-      </div>
-
+    <div class="auth-wrapper" style="max-width:500px;">
       <div class="auth-card">
         <div style="text-align:center; margin-bottom:24px;">
           <div style="display:inline-block; margin-bottom:8px;">${Icons.bloodDrop(36, '#dc2626')}</div>
@@ -414,29 +392,35 @@ function renderDonorLoginPage() {
           </button>
         </form>
 
-        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); font-size:12px; display:flex; flex-direction:column; gap:8px;">
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); font-size:12px; display:flex; flex-direction:column; gap:10px;">
           <div>
             Approved by hospital but haven't set a password?
-            <a href="javascript:void(0)" onclick="openActivationModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none;">
+            <a href="javascript:void(0)" onclick="openActivationModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
               Activate My Account →
             </a>
           </div>
           <div>
             Want to check your registration review status?
-            <a href="javascript:void(0)" onclick="navigateTo('track-status')" style="color:var(--navy-dark); font-weight:700; text-decoration:none;">
+            <a href="javascript:void(0)" onclick="navigateTo('track-status')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
               Track Application Status →
             </a>
           </div>
           <div>
             Haven't registered yet?
-            <a href="javascript:void(0)" onclick="openDonorRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none;">
+            <a href="javascript:void(0)" onclick="openDonorRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
               Apply to Become a Donor →
+            </a>
+          </div>
+          <div style="border-top:1px dashed var(--border-color); padding-top:8px;">
+            Are you healthcare or hospital staff?
+            <a href="javascript:void(0)" onclick="navigateTo('hospital-login')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
+              Hospital Staff Login →
             </a>
           </div>
         </div>
 
         <!-- Quick Demo Credentials Box for Evaluation -->
-        <div class="demo-helper-box">
+        <div class="demo-helper-box" style="margin-top:18px;">
           <div>💡 <strong>Demo Donor Login:</strong> Mobile: <code>+91 98765 43210</code> • Password: <code>donor123</code></div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="fillDemoDonorCredentials()">
             Auto-Fill
@@ -479,19 +463,7 @@ async function handleDonorLoginSubmit(e) {
 // ============================================================================
 function renderHospitalLoginPage() {
   return `
-    <div class="auth-wrapper">
-      <div class="auth-tabs">
-        <button class="auth-tab-btn" onclick="navigateTo('donor-login')">
-          ${Icons.user(14)} Donor Login
-        </button>
-        <button class="auth-tab-btn active" onclick="navigateTo('hospital-login')">
-          ${Icons.hospital(14)} Hospital Login
-        </button>
-        <button class="auth-tab-btn" onclick="navigateTo('track-status')">
-          ${Icons.activity(14)} Track Status
-        </button>
-      </div>
-
+    <div class="auth-wrapper" style="max-width:520px;">
       <div class="auth-card">
         <div style="text-align:center; margin-bottom:24px;">
           <div style="display:inline-block; margin-bottom:8px;">${Icons.hospital(36, '#0f172a')}</div>
@@ -503,7 +475,7 @@ function renderHospitalLoginPage() {
 
         <form onsubmit="handleHospitalLoginSubmit(event)">
           <div class="form-group">
-            <label class="form-label">Hospital Email Address *</label>
+            <label class="form-label">Official Hospital Email Address *</label>
             <input type="email" name="email" id="hospitalLoginEmail" class="form-control" required placeholder="metro.bloodbank@raktsetu.org" />
           </div>
 
@@ -519,21 +491,69 @@ function renderHospitalLoginPage() {
           </button>
         </form>
 
+        <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border-color); text-align:center; font-size:13px; display:flex; flex-direction:column; gap:10px;">
+          <div>
+            Need to onboard your healthcare facility?
+            <a href="javascript:void(0)" onclick="openHospitalRegisterModal()" style="color:var(--primary-red); font-weight:700; text-decoration:none; margin-left:4px;">
+              Register Your Hospital
+            </a>
+          </div>
+          <div>
+            Approved hospital waiting for activation?
+            <a href="javascript:void(0)" onclick="openHospitalActivationModal()" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
+              Activate Hospital Account
+            </a>
+          </div>
+          <div style="border-top:1px dashed var(--border-color); padding-top:8px;">
+            Looking for donor services or tracking?
+            <a href="javascript:void(0)" onclick="navigateTo('donor-login')" style="color:var(--navy-dark); font-weight:700; text-decoration:none; margin-left:4px;">
+              Donor Portal Login →
+            </a>
+          </div>
+          <div style="margin-top:4px;">
+            <a href="javascript:void(0)" onclick="openAdminPortalModal()" style="color:#64748b; font-size:12px; text-decoration:none;">
+              🏛️ Administrator Review Portal
+            </a>
+          </div>
+        </div>
+
         <!-- Quick Demo Credentials Box for Evaluation -->
-        <div class="demo-helper-box">
-          <div>💡 <strong>Demo Hospital:</strong> Email: <code>metro.bloodbank@raktsetu.org</code> • Password: <code>hospital123</code></div>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="fillDemoHospitalCredentials()">
-            Auto-Fill
-          </button>
+        <div class="demo-helper-box" style="margin-top:20px;">
+          <div style="font-size:12px; font-weight:700; color:var(--navy-dark); margin-bottom:8px;">
+            💡 Quick Demo Credentials for Evaluation:
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" onclick="fillDemoHosp('metro.bloodbank@raktsetu.org', 'hospital123')">
+              🏥 Metro General (Active)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;" onclick="fillDemoHosp('citylife.bank@raktsetu.org', 'hospital123')">
+              🏥 City Life (Active)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px; color:#ea580c;" onclick="fillDemoHosp('apex.hospital@demo.org', 'hospital123')">
+              ⏳ Apex (Pending Approval)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px; color:#7c3aed;" onclick="fillDemoHosp('sunrise.blood@demo.org', 'hospital123')">
+              ⚡ Sunrise (Approved, Inactive)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px; color:#dc2626;" onclick="fillDemoHosp('greenvalley@demo.org', 'hospital123')">
+              ❌ Green Valley (Rejected)
+            </button>
+          </div>
         </div>
       </div>
     </div>
   `;
 }
 
+function fillDemoHosp(email, pass) {
+  const emailInput = document.getElementById('hospitalLoginEmail');
+  const passInput = document.getElementById('hospitalLoginPassword');
+  if (emailInput) emailInput.value = email;
+  if (passInput) passInput.value = pass;
+}
+
 function fillDemoHospitalCredentials() {
-  document.getElementById('hospitalLoginEmail').value = 'metro.bloodbank@raktsetu.org';
-  document.getElementById('hospitalLoginPassword').value = 'hospital123';
+  fillDemoHosp('metro.bloodbank@raktsetu.org', 'hospital123');
 }
 
 async function handleHospitalLoginSubmit(e) {
@@ -553,7 +573,19 @@ async function handleHospitalLoginSubmit(e) {
     showToast(`Authenticated as ${res.hospital.name}`);
     renderApp();
   } catch (err) {
-    errorBox.textContent = err.message;
+    let msg = err.message;
+    if (msg.includes('NOT ACTIVATED') || msg.includes('APPROVED')) {
+      errorBox.innerHTML = `
+        ${msg}
+        <div style="margin-top:8px;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="openHospitalActivationModal('${email}')">
+            Activate Account Now
+          </button>
+        </div>
+      `;
+    } else {
+      errorBox.textContent = msg;
+    }
     errorBox.style.display = 'block';
   }
 }
@@ -564,18 +596,6 @@ async function handleHospitalLoginSubmit(e) {
 function renderStatusTrackerPage() {
   return `
     <div class="auth-wrapper" style="max-width:540px;">
-      <div class="auth-tabs">
-        <button class="auth-tab-btn" onclick="navigateTo('donor-login')">
-          ${Icons.user(14)} Donor Login
-        </button>
-        <button class="auth-tab-btn" onclick="navigateTo('hospital-login')">
-          ${Icons.hospital(14)} Hospital Login
-        </button>
-        <button class="auth-tab-btn active" onclick="navigateTo('track-status')">
-          ${Icons.activity(14)} Track Status
-        </button>
-      </div>
-
       <div class="auth-card">
         <div style="text-align:center; margin-bottom:20px;">
           <h2 style="font-size:22px; font-weight:800; color:var(--navy-dark);">Check Registration Status</h2>
@@ -618,6 +638,12 @@ function renderStatusTrackerPage() {
 
         <!-- Result Container -->
         <div id="statusTrackerResult" style="margin-top:20px;"></div>
+
+        <div style="margin-top:20px; text-align:center; padding-top:14px; border-top:1px solid var(--border-color);">
+          <a href="javascript:void(0)" onclick="navigateTo('donor-login')" style="color:var(--navy-slate); font-size:13px; font-weight:600; text-decoration:none;">
+            ← Return to Donor Login
+          </a>
+        </div>
       </div>
     </div>
   `;
@@ -862,6 +888,536 @@ async function handleFinalAccountActivation(e) {
   } catch (err) {
     errorBox.textContent = err.message;
     errorBox.style.display = 'block';
+  }
+}
+
+// ============================================================================
+// 5B. HOSPITAL REGISTRATION MODAL (Requirement 2)
+// ============================================================================
+function openHospitalRegisterModal() {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="closeModal(event)">
+      <div class="modal-box" style="max-width:640px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+            ${Icons.hospital(20, '#0284c7')} Register Your Hospital or Blood Centre
+          </h3>
+          <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+        </div>
+
+        <form onsubmit="handleHospitalRegisterSubmit(event)">
+          <div class="modal-body">
+            <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:var(--radius-sm); padding:12px; font-size:12px; color:#1e40af; line-height:1.5; margin-bottom:16px;">
+              “Hospital facilities and blood banks must be verified and approved by a RaktSetu platform administrator before account activation and dashboard access are granted.”
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Hospital / Blood Centre Official Name *</label>
+              <input type="text" name="name" id="regHospName" class="form-control" required placeholder="e.g. Lilavati Hospital & Research Centre" />
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Official Email Address *</label>
+                <input type="email" name="email" id="regHospEmail" class="form-control" required placeholder="bloodbank@lilavati.org" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Official Contact Number *</label>
+                <input type="tel" name="phone" id="regHospPhone" class="form-control" required placeholder="+91 98200 12345" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Complete Facility Address *</label>
+              <input type="text" name="address" id="regHospAddress" class="form-control" required placeholder="A-791, Bandra Reclamation, Bandra West" />
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">City *</label>
+                <input type="text" name="city" id="regHospCity" class="form-control" required value="Mumbai" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">PIN Code *</label>
+                <input type="text" name="pincode" id="regHospPincode" class="form-control" required placeholder="400050" />
+              </div>
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Staff Password *</label>
+                <input type="password" name="password" id="regHospPass" class="form-control" required placeholder="Min 6 characters" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Confirm Password *</label>
+                <input type="password" name="confirmPassword" id="regHospConfirmPass" class="form-control" required placeholder="Re-enter password" />
+              </div>
+            </div>
+
+            <div id="hospRegError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-top:8px;"></div>
+          </div>
+
+          <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="fillDemoHospitalRegistration()">
+              Auto-Fill Sample Data
+            </button>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="btnSubmitHospReg">Submit Application</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function fillDemoHospitalRegistration() {
+  const rand = Math.floor(100 + Math.random() * 900);
+  document.getElementById('regHospName').value = `Fortis Memorial Blood Centre ${rand}`;
+  document.getElementById('regHospEmail').value = `fortis.centre${rand}@raktsetu.org`;
+  document.getElementById('regHospPhone').value = `+91 98200 ${rand}11`;
+  document.getElementById('regHospAddress').value = `Mulund Goregaon Link Road, Mulund West`;
+  document.getElementById('regHospCity').value = 'Mumbai';
+  document.getElementById('regHospPincode').value = '400080';
+  document.getElementById('regHospPass').value = 'hospital123';
+  document.getElementById('regHospConfirmPass').value = 'hospital123';
+}
+
+async function handleHospitalRegisterSubmit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const errorBox = document.getElementById('hospRegError');
+  const btn = document.getElementById('btnSubmitHospReg');
+
+  errorBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  const payload = {
+    name: form.name.value.trim(),
+    email: form.email.value.trim(),
+    phone: form.phone.value.trim(),
+    address: form.address.value.trim(),
+    city: form.city.value.trim(),
+    pincode: form.pincode.value.trim(),
+    password: form.password.value,
+    confirmPassword: form.confirmPassword.value
+  };
+
+  try {
+    const res = await API.submitHospitalRegistration(payload);
+    const container = document.getElementById('modalContainer');
+    container.innerHTML = `
+      <div class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-box" style="max-width:540px; text-align:center;" onclick="event.stopPropagation()">
+          <div class="modal-body" style="padding:32px 24px;">
+            <div style="font-size:44px; margin-bottom:12px;">🏥✅</div>
+            <h3 style="font-size:20px; font-weight:800; color:var(--navy-dark); margin-bottom:8px;">
+              Hospital Registration Submitted
+            </h3>
+            <p style="font-size:13px; color:var(--text-muted); line-height:1.5; margin-bottom:20px;">
+              Your hospital registration application has been received and logged in the database.
+            </p>
+
+            <div style="background:var(--bg-subtle); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:16px; margin-bottom:20px; text-align:left;">
+              <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Application Tracking ID:</div>
+              <div style="font-size:18px; font-weight:800; color:var(--primary-red); font-family:monospace;">${res.applicationId}</div>
+              <div style="margin-top:10px; font-size:12px; color:var(--navy-dark);">
+                Status: <span class="badge warning" style="font-size:11px;">PENDING APPROVAL</span>
+              </div>
+            </div>
+
+            <div style="background:#fffbeb; border:1px solid #fef3c7; border-radius:var(--radius-sm); padding:12px; font-size:12px; color:#92400e; text-align:left; margin-bottom:24px;">
+              ⚠️ <strong>Next Steps:</strong> An authorised RaktSetu administrator must review facility credentials before account activation. You cannot log in until approved.
+            </div>
+
+            <div style="display:flex; justify-content:center; gap:12px;">
+              <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+              <button class="btn btn-primary" onclick="closeModal(); openAdminPortalModal();">
+                🏛️ Review in Admin Portal
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    showToast('Hospital application submitted successfully!');
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Submit Application';
+  }
+}
+
+// ============================================================================
+// 5C. HOSPITAL ACTIVATION MODAL (Requirement 4)
+// ============================================================================
+function openHospitalActivationModal(defaultEmail = '') {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="closeModal(event)">
+      <div class="modal-box" style="max-width:520px;" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+            ${Icons.sparkles(18, '#0284c7')} First-Time Hospital Account Activation
+          </h3>
+          <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+            Enter your approved hospital official email address or Application ID to verify your facility and complete activation.
+          </p>
+
+          <form onsubmit="handleHospitalActivationCodeRequest(event)">
+            <div class="form-group">
+              <label class="form-label">Official Hospital Email or Application ID *</label>
+              <input type="text" id="hospActLookup" class="form-control" required value="${defaultEmail}" placeholder="e.g. sunrise.blood@demo.org or RS-HOSP-DEMO-APPROVED" />
+            </div>
+
+            <div id="hospActRequestError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-bottom:12px;"></div>
+
+            <button type="submit" class="btn btn-primary" id="btnHospActReq" style="width:100%;">
+              Verify & Request Activation Code
+            </button>
+          </form>
+
+          <div id="hospActivationStep2" style="margin-top:20px; display:none;"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleHospitalActivationCodeRequest(e) {
+  e.preventDefault();
+  const lookup = document.getElementById('hospActLookup').value.trim();
+  const errorBox = document.getElementById('hospActRequestError');
+  const btn = document.getElementById('btnHospActReq');
+
+  errorBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  try {
+    const res = await API.requestHospitalActivationCode(lookup);
+    AppState.hospActivationData = { lookup, otp: res.demoActivationOtp, hospitalName: res.hospitalName };
+    renderHospitalActivationStep2(res);
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Verify & Request Activation Code';
+  }
+}
+
+function renderHospitalActivationStep2(res) {
+  const step2 = document.getElementById('hospActivationStep2');
+  if (!step2) return;
+
+  step2.style.display = 'block';
+  step2.innerHTML = `
+    <div style="border-top:1px solid var(--border-color); padding-top:16px;">
+      <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:var(--radius-sm); padding:12px; margin-bottom:16px; font-size:12px; color:#065f46;">
+        <div><strong>Facility Identified:</strong> ${res.hospitalName}</div>
+        <div style="margin-top:4px;">${res.demoOtpNotice}</div>
+        <div style="margin-top:6px; font-size:14px; font-weight:800; color:#047857; letter-spacing:2px;">
+          Demo Activation OTP: <code>${res.demoActivationOtp || res.activationCode}</code>
+        </div>
+      </div>
+
+      <form onsubmit="handleHospitalFinalActivation(event)">
+        <div class="form-group">
+          <label class="form-label">Enter 6-Digit Activation Code *</label>
+          <input type="text" id="hospActOtp" class="form-control" required maxlength="6" value="${res.demoActivationOtp || ''}" placeholder="123456" style="font-size:16px; letter-spacing:4px; text-align:center; font-weight:800;" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Update Password (Optional - leave blank to keep existing)</label>
+          <input type="password" id="hospActNewPass" class="form-control" placeholder="New staff password (optional)" />
+        </div>
+
+        <div id="hospActFinalError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-bottom:12px;"></div>
+
+        <button type="submit" class="btn btn-primary" id="btnHospFinalAct" style="width:100%;">
+          Complete Hospital Activation
+        </button>
+      </form>
+    </div>
+  `;
+}
+
+async function handleHospitalFinalActivation(e) {
+  e.preventDefault();
+  const otp = document.getElementById('hospActOtp').value.trim();
+  const newPass = document.getElementById('hospActNewPass').value;
+  const errorBox = document.getElementById('hospActFinalError');
+  const btn = document.getElementById('btnHospFinalAct');
+
+  errorBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Activating...';
+
+  try {
+    const res = await API.activateHospitalAccount({
+      email: AppState.hospActivationData.lookup,
+      activationCode: otp,
+      password: newPass || undefined
+    });
+
+    closeModal();
+    showToast(res.message);
+    navigateTo('hospital-login');
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Complete Hospital Activation';
+  }
+}
+
+// ============================================================================
+// 5D. ADMINISTRATOR REVIEW PORTAL MODAL (Requirement 3)
+// ============================================================================
+async function openAdminPortalModal() {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  if (AppState.userType === 'ADMIN' && AppState.adminUser) {
+    renderAdminPortalContent();
+  } else {
+    container.innerHTML = `
+      <div class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-box" style="max-width:440px;" onclick="event.stopPropagation()">
+          <div class="modal-header">
+            <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+              ${Icons.shield(18, '#0f766e')} RaktSetu Administrator Portal
+            </h3>
+            <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+          </div>
+
+          <form onsubmit="handleAdminLoginSubmit(event)">
+            <div class="modal-body">
+              <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
+                Platform administrators review, verify, and approve hospital healthcare facility registrations.
+              </p>
+
+              <div class="form-group">
+                <label class="form-label">Administrator Email / Username *</label>
+                <input type="text" id="adminLoginUser" class="form-control" required placeholder="admin@raktsetu.org" />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Admin Password *</label>
+                <input type="password" id="adminLoginPass" class="form-control" required placeholder="Enter password" />
+              </div>
+
+              <div id="adminLoginError" style="display:none; background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px; font-size:12px; color:#991b1b; margin-bottom:12px;"></div>
+
+              <button type="submit" class="btn btn-primary" id="btnAdminLogin" style="width:100%; background:#0f766e; border-color:#0f766e;">
+                Authenticate as Administrator
+              </button>
+
+              <div class="demo-helper-box" style="margin-top:16px;">
+                <div>💡 <strong>Admin Credentials:</strong> User: <code>admin@raktsetu.org</code> • Pass: <code>admin123</code></div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="fillAdminCredentials()">Auto-Fill</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function fillAdminCredentials() {
+  document.getElementById('adminLoginUser').value = 'admin@raktsetu.org';
+  document.getElementById('adminLoginPass').value = 'admin123';
+}
+
+async function handleAdminLoginSubmit(e) {
+  e.preventDefault();
+  const username = document.getElementById('adminLoginUser').value.trim();
+  const password = document.getElementById('adminLoginPass').value;
+  const errorBox = document.getElementById('adminLoginError');
+  const btn = document.getElementById('btnAdminLogin');
+
+  errorBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+
+  try {
+    const res = await API.adminLogin(username, password);
+    AppState.userType = 'ADMIN';
+    AppState.adminUser = res.admin;
+    showToast(`Authenticated as Administrator ${res.admin.fullName}`);
+    renderAdminPortalContent();
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Authenticate as Administrator';
+  }
+}
+
+async function renderAdminPortalContent(currentStatus = 'ALL') {
+  const container = document.getElementById('modalContainer');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="modal-overlay" onclick="closeModal(event)">
+      <div class="modal-box" style="max-width:880px;" onclick="event.stopPropagation()">
+        <div class="modal-header" style="background:#f8fafc;">
+          <div>
+            <h3 style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+              ${Icons.shield(18, '#0f766e')} Hospital Registrations & Facility Approvals
+            </h3>
+            <span style="font-size:12px; color:var(--text-muted);">
+              Logged in as: <strong>${AppState.adminUser?.fullName || 'Platform Administrator'}</strong> (${AppState.adminUser?.email || ''})
+            </span>
+          </div>
+          <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
+        </div>
+
+        <div class="modal-body" style="padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <div class="tab-pills">
+              <button class="pill-btn ${currentStatus === 'ALL' ? 'active' : ''}" onclick="renderAdminPortalContent('ALL')">All Applications</button>
+              <button class="pill-btn ${currentStatus === 'PENDING_APPROVAL' ? 'active' : ''}" onclick="renderAdminPortalContent('PENDING_APPROVAL')">Pending Review</button>
+              <button class="pill-btn ${currentStatus === 'APPROVED' ? 'active' : ''}" onclick="renderAdminPortalContent('APPROVED')">Approved</button>
+              <button class="pill-btn ${currentStatus === 'REJECTED' ? 'active' : ''}" onclick="renderAdminPortalContent('REJECTED')">Rejected</button>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="renderAdminPortalContent('${currentStatus}')">Refresh</button>
+          </div>
+
+          <div id="adminHospitalTableContainer" style="overflow-x:auto;">
+            <div style="text-align:center; padding:30px; color:var(--text-muted);">Loading applications...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const res = await API.getAdminHospitalApplications({ status: currentStatus });
+    const tableContainer = document.getElementById('adminHospitalTableContainer');
+    if (!tableContainer) return;
+
+    if (!res.applications || res.applications.length === 0) {
+      tableContainer.innerHTML = `
+        <div style="text-align:center; padding:40px; color:var(--text-muted);">
+          No hospital applications found matching current filter.
+        </div>
+      `;
+      return;
+    }
+
+    let rowsHtml = res.applications.map(h => {
+      const isPending = h.registration_status === 'PENDING_APPROVAL';
+      const isApproved = h.registration_status === 'APPROVED';
+      const isRejected = h.registration_status === 'REJECTED';
+
+      const statusBadge = isPending
+        ? `<span class="badge warning">PENDING APPROVAL</span>`
+        : isApproved
+          ? `<span class="badge success">APPROVED</span>`
+          : `<span class="badge critical">REJECTED</span>`;
+
+      return `
+        <tr>
+          <td>
+            <div style="font-weight:700; color:var(--navy-dark);">${h.name}</div>
+            <div style="font-size:11px; font-family:monospace; color:var(--primary-red);">${h.application_id || '#' + h.id}</div>
+          </td>
+          <td style="font-size:12px;">
+            <div>${h.email}</div>
+            <div style="color:var(--text-muted);">${h.phone}</div>
+          </td>
+          <td style="font-size:12px;">
+            <div>${h.city} (${h.pincode})</div>
+            <div style="color:var(--text-muted); font-size:11px;">${h.address}</div>
+          </td>
+          <td style="font-size:12px; color:var(--text-muted);">${h.created_at ? h.created_at.split(' ')[0] : 'Recently'}</td>
+          <td>
+            ${statusBadge}
+            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+              Acc: <strong>${h.account_status}</strong>
+            </div>
+            ${h.rejection_reason ? `<div style="font-size:10px; color:#dc2626; margin-top:2px;">Reason: ${h.rejection_reason}</div>` : ''}
+          </td>
+          <td>
+            ${isPending ? `
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-sm btn-primary" style="background:#059669; border-color:#059669; font-size:11px; padding:4px 8px;" onclick="handleAdminApproveHospital(${h.id}, '${currentStatus}')">
+                  Approve
+                </button>
+                <button class="btn btn-sm btn-secondary" style="color:#dc2626; font-size:11px; padding:4px 8px;" onclick="handleAdminRejectHospital(${h.id}, '${currentStatus}')">
+                  Reject
+                </button>
+              </div>
+            ` : `
+              <span style="font-size:11px; color:var(--text-muted);">
+                ${h.reviewed_at ? 'Reviewed ' + h.reviewed_at.split(' ')[0] : 'Processed'}
+              </span>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tableContainer.innerHTML = `
+      <table class="data-table" style="width:100%; font-size:13px;">
+        <thead>
+          <tr>
+            <th>Hospital Name & ID</th>
+            <th>Contact Details</th>
+            <th>Location</th>
+            <th>Application Date</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    const tableContainer = document.getElementById('adminHospitalTableContainer');
+    if (tableContainer) {
+      tableContainer.innerHTML = `<div style="color:#dc2626; padding:20px;">Failed to load applications: ${err.message}</div>`;
+    }
+  }
+}
+
+async function handleAdminApproveHospital(id, currentStatus) {
+  if (!confirm('Are you sure you want to approve this hospital facility for account activation?')) return;
+  try {
+    const res = await API.adminApproveHospital(id, 'Facility licensing credentials verified by administrator.');
+    showToast(res.message);
+    renderAdminPortalContent(currentStatus);
+  } catch (err) {
+    alert('Approval failed: ' + err.message);
+  }
+}
+
+async function handleAdminRejectHospital(id, currentStatus) {
+  const reason = prompt('Please enter the administrative reason for rejecting this hospital application:', 'Facility licensing accreditation documentation could not be verified.');
+  if (!reason || !reason.trim()) return;
+
+  try {
+    const res = await API.adminRejectHospital(id, reason.trim());
+    showToast(res.message);
+    renderAdminPortalContent(currentStatus);
+  } catch (err) {
+    alert('Rejection failed: ' + err.message);
   }
 }
 

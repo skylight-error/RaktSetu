@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { forecastDemand } = require('../ai/demandForecasting');
 const { db } = require('../db/database');
+const { requireHospital } = require('../middleware/auth');
 
 /**
  * Run demand forecasting model for specific blood group & component
+ * Protected: requires hospital authentication
  */
-router.get('/forecast', (req, res) => {
-  const hospitalId = Number(req.query.hospitalId) || 1;
+router.get('/forecast', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
   const bloodGroup = req.query.bloodGroup || 'O+';
   const component = req.query.component || 'Packed Red Blood Cells (PRBC)';
 
@@ -21,9 +23,10 @@ router.get('/forecast', (req, res) => {
 
 /**
  * Run comprehensive shortage risk matrix across all blood groups
+ * Protected: requires hospital authentication
  */
-router.get('/shortage-matrix', (req, res) => {
-  const hospitalId = Number(req.query.hospitalId) || 1;
+router.get('/shortage-matrix', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
   const component = req.query.component || 'Packed Red Blood Cells (PRBC)';
   const groups = ['O+', 'O-', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-'];
 

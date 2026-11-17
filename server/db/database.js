@@ -228,6 +228,16 @@ function initSchema() {
       day_of_week INTEGER NOT NULL,
       FOREIGN KEY (hospital_id) REFERENCES hospitals(id)
     );
+    CREATE TABLE IF NOT EXISTS administrators (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      full_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      role TEXT DEFAULT 'SUPER_ADMIN',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Run schema migration checks for columns that might be missing in existing database files
@@ -245,6 +255,14 @@ function initSchema() {
   safeAddColumn('donors', 'medical_screening_status', "TEXT DEFAULT 'PENDING_SCREENING'");
   safeAddColumn('donor_applications', 'donor_id', 'INTEGER');
   safeAddColumn('hospitals', 'password_salt', 'TEXT');
+  safeAddColumn('hospitals', 'application_id', 'TEXT');
+  safeAddColumn('hospitals', 'registration_status', "TEXT DEFAULT 'APPROVED'");
+  safeAddColumn('hospitals', 'account_status', "TEXT DEFAULT 'ACTIVE'");
+  safeAddColumn('hospitals', 'reviewed_by_admin_id', 'INTEGER');
+  safeAddColumn('hospitals', 'reviewed_at', 'TEXT');
+  safeAddColumn('hospitals', 'rejection_reason', 'TEXT');
+  safeAddColumn('hospitals', 'activation_otp', 'TEXT');
+  safeAddColumn('hospitals', 'activation_otp_expires_at', 'TEXT');
   safeAddColumn('notifications', 'application_id', 'INTEGER');
 }
 

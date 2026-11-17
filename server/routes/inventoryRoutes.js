@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db/database');
+const { requireHospital } = require('../middleware/auth');
 
 const COMPONENT_SHELF_LIFE_DAYS = {
   'Platelets': 5,
@@ -11,9 +12,10 @@ const COMPONENT_SHELF_LIFE_DAYS = {
 
 /**
  * Get inventory items for hospital with computed expiry status
+ * Protected: requires authenticated hospital
  */
-router.get('/:hospitalId', (req, res) => {
-  const hospitalId = Number(req.params.hospitalId) || 1;
+router.get('/:hospitalId', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
   const { bloodGroup, component, status } = req.query;
 
   let sql = 'SELECT * FROM inventory WHERE hospital_id = ?';
@@ -78,11 +80,16 @@ router.get('/:hospitalId', (req, res) => {
 /**
  * Add stock to inventory (Workflow 9 & DEMO 7)
  */
-router.post('/add', (req, res) => {
-  const { hospitalId, bloodGroup, component, quantityUnits, collectionDate, storageLocation } = req.body;
+router.post('/add', requireHospital, (req, res) => {
+  const targetHospitalId = Number(req.body.hospitalId) || req.hospital.id;
+  if (targetHospitalId !== req.hospital.id) {
+    return res.status(403).json({ error: "Forbidden: You cannot add inventory to another hospital's stock." });
+  }
+  const hospitalId = req.hospital.id;
+  const { bloodGroup, component, quantityUnits, collectionDate, storageLocation } = req.body;
 
-  if (!hospitalId || !bloodGroup || !component || !quantityUnits) {
-    return res.status(400).json({ error: 'Hospital, blood group, component, and quantity are required.' });
+  if (!bloodGroup || !component || !quantityUnits) {
+    return res.status(400).json({ error: 'Blood group, component, and quantity are required.' });
   }
 
   const colDate = collectionDate ? new Date(collectionDate) : new Date();
@@ -129,8 +136,8 @@ router.post('/add', (req, res) => {
 /**
  * Issue blood units from stock (Workflow DEMO 7)
  */
-router.post('/issue', (req, res) => {
-  const { inventoryId, quantity, reason, hospitalId } = req.body;
+router.post('/issue', requireHospital, (req, res) => {
+  const { inventoryId, quantity, reason } = req.body;
 
   if (!inventoryId || !quantity) {
     return res.status(400).json({ error: 'Inventory ID and quantity are required.' });
@@ -139,6 +146,10 @@ router.post('/issue', (req, res) => {
   const item = db.prepare('SELECT * FROM inventory WHERE id = ?').get(inventoryId);
   if (!item) {
     return res.status(404).json({ error: 'Inventory item not found.' });
+  }
+
+  if (item.hospital_id !== req.hospital.id) {
+    return res.status(403).json({ error: 'Forbidden: You cannot issue blood units belonging to another hospital facility.' });
   }
 
   if (item.status === 'EXPIRED') {
@@ -172,8 +183,8 @@ router.post('/issue', (req, res) => {
 /**
  * Get inventory transaction history
  */
-router.get('/:hospitalId/transactions', (req, res) => {
-  const hospitalId = Number(req.params.hospitalId) || 1;
+router.get('/:hospitalId/transactions', requireHospital, (req, res) => {
+  const hospitalId = req.hospital.id;
   const transactions = db.prepare(`
     SELECT * FROM inventory_transactions
     WHERE hospital_id = ?

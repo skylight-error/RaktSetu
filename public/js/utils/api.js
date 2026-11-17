@@ -60,6 +60,45 @@ const API = {
     return res;
   },
 
+  submitHospitalRegistration: (payload) => API.request('/auth/hospital/register', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  requestHospitalActivationCode: (emailOrAppId) => API.request('/auth/hospital/request-activation-code', {
+    method: 'POST',
+    body: JSON.stringify({ email: emailOrAppId })
+  }),
+
+  activateHospitalAccount: (payload) => API.request('/auth/hospital/activate', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  adminLogin: async (username, password) => {
+    const res = await API.request('/auth/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    if (res.token) API.setToken(res.token);
+    return res;
+  },
+
+  getAdminHospitalApplications: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return API.request(`/admin/hospital-applications?${qs}`);
+  },
+
+  adminApproveHospital: (hospitalId, notes) => API.request(`/admin/hospital-applications/${hospitalId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ notes })
+  }),
+
+  adminRejectHospital: (hospitalId, rejectionReason) => API.request(`/admin/hospital-applications/${hospitalId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ rejectionReason })
+  }),
+
   getAuthSession: () => API.request('/auth/me'),
 
   logout: async () => {

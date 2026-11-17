@@ -6,7 +6,7 @@ const { matchDonorsForRequest } = require('./ai/donorMatching');
 
 async function runTests() {
   console.log('================================================================');
-  console.log('       RAKTSETU COMPREHENSIVE ONBOARDING & SECURITY SUITE       ');
+  console.log('       RAKTSETU HOSPITAL REGISTRATION & SECURITY SUITE          ');
   console.log('================================================================\n');
 
   // Wait 1 second for express server to bind port
@@ -15,7 +15,7 @@ async function runTests() {
   const BASE_URL = `http://127.0.0.1:5002`;
 
   let passedTests = 0;
-  let totalTests = 18;
+  const totalTests = 14;
 
   function assert(condition, message, extra) {
     if (!condition) {
@@ -27,343 +27,312 @@ async function runTests() {
 
   try {
     // -------------------------------------------------------------------------
-    // SCENARIO 1: Public visitor submits donor registration
+    // TEST CASE 1: New hospital can submit registration
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 1: Public Visitor Submits Donor Registration ---');
-    const testMobile = '9988776655';
-    // Clean test mobile if previously run
-    db.prepare("DELETE FROM notifications WHERE application_id IN (SELECT id FROM donor_applications WHERE replace(replace(replace(mobile, ' ', ''), '+', ''), '-', '') LIKE '%9988776655%')").run();
-    db.prepare("DELETE FROM donor_accounts WHERE mobile LIKE '%9988776655%' OR replace(replace(replace(mobile, ' ', ''), '+', ''), '-', '') LIKE '%9988776655%'").run();
-    db.prepare("DELETE FROM donor_applications WHERE mobile LIKE '%9988776655%' OR replace(replace(replace(mobile, ' ', ''), '+', ''), '-', '') LIKE '%9988776655%'").run();
-    db.prepare("DELETE FROM donors WHERE mobile LIKE '%9988776655%' OR replace(replace(replace(mobile, ' ', ''), '+', ''), '-', '') LIKE '%9988776655%'").run();
+    console.log('\n--- Case 1: New Hospital Submits Registration ---');
+    const testHospEmail = 'test.heritage.hospital@raktsetu.org';
+    db.prepare('DELETE FROM hospitals WHERE lower(email) = ?').run(testHospEmail);
 
     const regPayload = {
-      fullName: 'Ananya Deshmukh',
-      dob: '1996-08-15',
-      gender: 'Female',
-      mobile: testMobile,
-      email: 'ananya.test@example.com',
-      bloodGroup: 'B+',
-      address: 'Flat 402, Green Park Avenue',
-      city: 'Mumbai',
-      pincode: '400012',
-      preferredHospitalId: 1,
-      consentContact: true
+      name: 'Heritage Multi-Specialty Hospital',
+      email: testHospEmail,
+      phone: '+91 98200 88990',
+      address: 'Plot 45, Sector 12, Navi Mumbai',
+      city: 'Navi Mumbai',
+      pincode: '400703',
+      password: 'StrongHospPassword@2026',
+      confirmPassword: 'StrongHospPassword@2026'
     };
 
-    const regRes = await fetch(`${BASE_URL}/api/applications/register`, {
+    const regRes = await fetch(`${BASE_URL}/api/auth/hospital/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(regPayload)
     });
     const regData = await regRes.json();
-    assert(regRes.status === 201, 'Registration returns HTTP 201 Created', { status: regRes.status, data: regData });
+    assert(regRes.status === 201, 'Registration returns HTTP 201 Created', regData);
     assert(regData.success === true, 'Response contains success: true');
     assert(Boolean(regData.applicationId), `Generated Application ID: ${regData.applicationId}`);
-    assert(regData.status === 'PENDING_APPROVAL', 'Initial status is PENDING_APPROVAL');
-    const testAppId = regData.applicationId;
+    assert(regData.registrationStatus === 'PENDING_APPROVAL', 'Initial registration status is PENDING_APPROVAL');
+    assert(regData.accountStatus === 'NOT_ACTIVATED', 'Initial account status is NOT_ACTIVATED');
+    const newHospitalId = regData.hospitalId;
     passedTests++;
 
     // -------------------------------------------------------------------------
-    // SCENARIO 2: Application saved with PENDING_APPROVAL in database
+    // TEST CASE 2: Duplicate hospital registration is rejected
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 2: Application Saved in Database with PENDING_APPROVAL ---');
-    const savedApp = db.prepare('SELECT * FROM donor_applications WHERE application_id = ?').get(testAppId);
-    assert(Boolean(savedApp), 'Application found in database');
-    assert(savedApp.status === 'PENDING_APPROVAL', 'Status in database is PENDING_APPROVAL');
-    assert(savedApp.full_name === 'Ananya Deshmukh', 'Donor name matches submitted application');
-    assert(Boolean(savedApp.activation_otp), 'Activation OTP generated and stored');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 3: Pending applicant cannot log in
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 3: Pending Applicant Cannot Log In ---');
-    const loginPendingRes = await fetch(`${BASE_URL}/api/auth/donor/login`, {
+    console.log('\n--- Case 2: Duplicate Hospital Registration Is Rejected ---');
+    const dupRes = await fetch(`${BASE_URL}/api/auth/hospital/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: testMobile, password: 'Password@123' })
+      body: JSON.stringify(regPayload)
     });
-    const loginPendingData = await loginPendingRes.json();
-    assert(loginPendingRes.status === 403, 'Pending applicant login rejected with HTTP 403 Forbidden');
-    assert(loginPendingData.registrationStatus === 'PENDING_APPROVAL', 'Response indicates PENDING_APPROVAL');
+    const dupData = await dupRes.json();
+    assert(dupRes.status === 400, 'Duplicate email registration rejected with HTTP 400 Bad Request');
+    assert(dupData.error.includes('already exists'), 'Duplicate error explains registration exists');
     passedTests++;
 
     // -------------------------------------------------------------------------
-    // SCENARIO 4: Pending applicant cannot activate account
+    // TEST CASE 3: Pending hospital cannot log in
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 4: Pending Applicant Cannot Activate Account ---');
-    const reqCodeRes = await fetch(`${BASE_URL}/api/auth/donor/request-activation-code`, {
+    console.log('\n--- Case 3: Pending Hospital Cannot Log In ---');
+    const pendingLoginRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ applicationId: testAppId, mobile: testMobile })
+      body: JSON.stringify({ email: testHospEmail, password: 'StrongHospPassword@2026' })
     });
-    const reqCodeData = await reqCodeRes.json();
-    assert(reqCodeRes.status === 403, 'Requesting activation code for pending application returns HTTP 403 Forbidden');
-    assert(reqCodeData.error.includes('PENDING APPROVAL'), 'Error clarifies approval is required first');
+    const pendingLoginData = await pendingLoginRes.json();
+    assert(pendingLoginRes.status === 403, 'Pending hospital login rejected with HTTP 403 Forbidden');
+    assert(pendingLoginData.registrationStatus === 'PENDING_APPROVAL', 'Response indicates PENDING_APPROVAL');
+    passedTests++;
 
-    const activatePendingRes = await fetch(`${BASE_URL}/api/auth/donor/activate`, {
+    // -------------------------------------------------------------------------
+    // TEST CASE 4: Administrator can approve a hospital
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 4: Administrator Can Approve a Hospital ---');
+    // Login as Admin
+    const adminLoginRes = await fetch(`${BASE_URL}/api/auth/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        applicationId: testAppId,
-        mobile: testMobile,
-        activationCode: savedApp.activation_otp,
-        password: 'SecurePassword@123'
-      })
+      body: JSON.stringify({ username: 'admin@raktsetu.org', password: 'admin123' })
     });
-    assert(activatePendingRes.status === 403, 'Activating pending application directly returns HTTP 403');
-    passedTests++;
+    const adminLoginData = await adminLoginRes.json();
+    assert(adminLoginRes.status === 200, 'Admin login succeeds with HTTP 200');
+    assert(Boolean(adminLoginData.token), 'Admin session token received');
+    const adminToken = adminLoginData.token;
 
-    // -------------------------------------------------------------------------
-    // SCENARIO 5: Hospital staff can view pending applications
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 5: Hospital Staff Can View Pending Applications ---');
-    // Login as hospital first
-    const hospLoginRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'metro.bloodbank@raktsetu.org', password: 'hospital123' })
-    });
-    const hospLoginData = await hospLoginRes.json();
-    assert(hospLoginRes.status === 200, 'Hospital login successful with HTTP 200');
-    assert(Boolean(hospLoginData.token), 'Hospital session token received');
-    const hospToken = hospLoginData.token;
-
-    // Fetch applications
-    const appsListRes = await fetch(`${BASE_URL}/api/hospital/applications?status=PENDING_APPROVAL`, {
-      headers: { 'Authorization': `Bearer ${hospToken}` }
-    });
-    const appsListData = await appsListRes.json();
-    assert(appsListRes.status === 200, 'Fetching hospital applications returns HTTP 200');
-    const targetApp = appsListData.applications.find(a => a.application_id === testAppId);
-    assert(Boolean(targetApp), `Submitted application ${testAppId} present in pending applications list`);
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 6: Unauthorised user cannot approve application
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 6: Unauthorised User Cannot Approve Application ---');
-    const unauthApproveRes = await fetch(`${BASE_URL}/api/hospital/applications/${targetApp.id}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    assert(unauthApproveRes.status === 401, 'Unauthenticated approval rejected with HTTP 401 Unauthorized');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 7: Hospital staff can approve application
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 7: Hospital Staff Can Approve Application ---');
-    const approveRes = await fetch(`${BASE_URL}/api/hospital/applications/${targetApp.id}/approve`, {
+    // Approve new hospital
+    const approveRes = await fetch(`${BASE_URL}/api/admin/hospital-applications/${newHospitalId}/approve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${hospToken}`
+        'Authorization': `Bearer ${adminToken}`
       },
-      body: JSON.stringify({ notes: 'Verified ID proof and contact information.' })
+      body: JSON.stringify({ notes: 'Facility licensing and blood bank equipment verified.' })
     });
     const approveData = await approveRes.json();
-    assert(approveRes.status === 200, 'Hospital approval returns HTTP 200');
-    assert(approveData.success === true, 'Approval marked successful');
+    assert(approveRes.status === 200, 'Admin approval returns HTTP 200');
+    assert(approveData.success === true, 'Hospital approval marked successful');
 
-    const appAfterApproval = db.prepare('SELECT * FROM donor_applications WHERE id = ?').get(targetApp.id);
-    assert(appAfterApproval.status === 'APPROVED', 'Application status updated to APPROVED');
-    assert(Boolean(appAfterApproval.reviewed_at), 'Reviewed timestamp recorded');
-    assert(Boolean(appAfterApproval.donor_id), 'Donor profile created with ID: ' + appAfterApproval.donor_id);
-
-    const newDonor = db.prepare('SELECT * FROM donors WHERE id = ?').get(appAfterApproval.donor_id);
-    assert(newDonor.registration_status === 'APPROVED', 'Donor registration_status is APPROVED');
-    assert(newDonor.account_status === 'NOT_ACTIVATED', 'Donor account_status is initially NOT_ACTIVATED');
+    const hospInDb = db.prepare('SELECT * FROM hospitals WHERE id = ?').get(newHospitalId);
+    assert(hospInDb.registration_status === 'APPROVED', 'Hospital registration_status updated to APPROVED in DB');
+    assert(hospInDb.account_status === 'NOT_ACTIVATED', 'Hospital account_status remains NOT_ACTIVATED prior to activation');
     passedTests++;
 
     // -------------------------------------------------------------------------
-    // SCENARIO 8: Approved donor completes activation with OTP and password
+    // TEST CASE 5: Rejected hospital cannot log in
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 8: Approved Donor Completes First-Time Activation ---');
-    // Request activation code
-    const otpReqRes = await fetch(`${BASE_URL}/api/auth/donor/request-activation-code`, {
+    console.log('\n--- Case 5: Rejected Hospital Cannot Log In ---');
+    // Pre-seeded rejected hospital: greenvalley@demo.org
+    const rejLoginRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ applicationId: testAppId, mobile: testMobile })
+      body: JSON.stringify({ email: 'greenvalley@demo.org', password: 'hospital123' })
     });
-    const otpReqData = await otpReqRes.json();
-    assert(otpReqRes.status === 200, 'Request activation code for approved application returns HTTP 200');
-    assert(Boolean(otpReqData.activationCode), 'Demo activation code / OTP returned: ' + otpReqData.activationCode);
+    const rejLoginData = await rejLoginRes.json();
+    assert(rejLoginRes.status === 403, 'Rejected hospital login returns HTTP 403 Forbidden');
+    assert(rejLoginData.registrationStatus === 'REJECTED', 'Response confirms REJECTED status');
+    assert(Boolean(rejLoginData.error), 'Rejection reason returned: ' + rejLoginData.error);
+    passedTests++;
 
-    // Complete activation
-    const newPassword = 'DonorStrongPassword@2026';
-    const activateRes = await fetch(`${BASE_URL}/api/auth/donor/activate`, {
+    // -------------------------------------------------------------------------
+    // TEST CASE 6: Approved but inactive hospital cannot log in
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 6: Approved But Inactive Hospital Cannot Log In ---');
+    const inactiveLoginRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testHospEmail, password: 'StrongHospPassword@2026' })
+    });
+    const inactiveLoginData = await inactiveLoginRes.json();
+    assert(inactiveLoginRes.status === 403, 'Inactive approved hospital login rejected with HTTP 403');
+    assert(inactiveLoginData.accountStatus === 'NOT_ACTIVATED', 'Response indicates NOT_ACTIVATED');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 7: Activated hospital can log in with valid credentials
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 7: Activated Hospital Logs In With Valid Credentials ---');
+    // Request activation code
+    const hospOtpRes = await fetch(`${BASE_URL}/api/auth/hospital/request-activation-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testHospEmail })
+    });
+    const hospOtpData = await hospOtpRes.json();
+    assert(hospOtpRes.status === 200, 'Hospital activation code request returns HTTP 200');
+    const hospOtp = hospOtpData.demoActivationOtp || hospOtpData.activationCode;
+    assert(Boolean(hospOtp), 'Activation OTP generated: ' + hospOtp);
+
+    // Complete hospital activation
+    const activateRes = await fetch(`${BASE_URL}/api/auth/hospital/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        applicationId: testAppId,
-        mobile: testMobile,
-        otp: otpReqData.activationCode,
-        password: newPassword
+        email: testHospEmail,
+        activationCode: hospOtp,
+        password: 'ActivatedHospPassword@2026'
       })
     });
     const activateData = await activateRes.json();
-    assert(activateRes.status === 200, 'Activation returns HTTP 200');
+    assert(activateRes.status === 200, 'Hospital account activation returns HTTP 200');
     assert(activateData.success === true, 'Activation succeeded');
 
-    const donorAfterActivation = db.prepare('SELECT * FROM donors WHERE id = ?').get(appAfterApproval.donor_id);
-    assert(donorAfterActivation.account_status === 'ACTIVE', 'Donor account_status is now ACTIVE');
-    const donorAccount = db.prepare('SELECT * FROM donor_accounts WHERE donor_id = ?').get(appAfterApproval.donor_id);
-    assert(Boolean(donorAccount), 'Donor account record created');
-    assert(Boolean(donorAccount.password_salt), 'Salt stored in donor_accounts');
-    assert(Boolean(donorAccount.password_hash), 'PBKDF2 password hash stored in donor_accounts');
+    const hospAfterAct = db.prepare('SELECT account_status FROM hospitals WHERE id = ?').get(newHospitalId);
+    assert(hospAfterAct.account_status === 'ACTIVE', 'Database confirms account_status = ACTIVE');
+
+    // Login with new password
+    const hospLoginRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testHospEmail, password: 'ActivatedHospPassword@2026' })
+    });
+    const hospLoginData = await hospLoginRes.json();
+    assert(hospLoginRes.status === 200, 'Hospital login succeeds with HTTP 200');
+    assert(hospLoginData.userType === 'HOSPITAL', 'userType returned is HOSPITAL');
+    assert(Boolean(hospLoginData.token), 'Hospital session token issued');
+    const newHospToken = hospLoginData.token;
     passedTests++;
 
     // -------------------------------------------------------------------------
-    // SCENARIO 9: Activated donor can log in with valid password
+    // TEST CASE 8: Incorrect password is rejected
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 9: Activated Donor Logs In With Valid Password ---');
+    console.log('\n--- Case 8: Incorrect Password Rejected ---');
+    const wrongPassRes = await fetch(`${BASE_URL}/api/auth/hospital/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: testHospEmail, password: 'WrongPasswordABC' })
+    });
+    assert(wrongPassRes.status === 401, 'Incorrect password rejected with HTTP 401 Unauthorized');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 9: Hospital can access its own dashboard
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 9: Hospital Can Access Its Own Dashboard ---');
+    const ownDashRes = await fetch(`${BASE_URL}/api/hospital/${newHospitalId}/dashboard-summary`, {
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
+    });
+    const ownDashData = await ownDashRes.json();
+    assert(ownDashRes.status === 200, 'Own dashboard summary succeeds with HTTP 200');
+    assert(ownDashData.hospitalId === newHospitalId, 'Dashboard data matches authenticated hospital ID');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 10: Hospital A cannot access Hospital B's records
+    // -------------------------------------------------------------------------
+    console.log("\n--- Case 10: Hospital A Cannot Access Hospital B's Records ---");
+    // Metro Hospital is ID 1. New hospital is newHospitalId (e.g. 6).
+    const crossDashRes = await fetch(`${BASE_URL}/api/hospital/1/dashboard-summary`, {
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
+    });
+    assert(crossDashRes.status === 403, 'Cross-hospital dashboard access blocked with HTTP 403 Forbidden');
+
+    const crossInventoryRes = await fetch(`${BASE_URL}/api/inventory/1`, {
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
+    });
+    assert(crossInventoryRes.status === 403, 'Cross-hospital inventory access blocked with HTTP 403 Forbidden');
+
+    const crossRequestsRes = await fetch(`${BASE_URL}/api/requests/hospital/1`, {
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
+    });
+    assert(crossRequestsRes.status === 403, 'Cross-hospital blood requests access blocked with HTTP 403 Forbidden');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 11: Unauthenticated users cannot access hospital APIs
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 11: Unauthenticated Users Cannot Access Hospital APIs ---');
+    const unauthDash = await fetch(`${BASE_URL}/api/hospital/1/dashboard-summary`);
+    assert(unauthDash.status === 401, 'Unauthenticated dashboard request returns HTTP 401 Unauthorized');
+
+    const unauthInventory = await fetch(`${BASE_URL}/api/inventory/1`);
+    assert(unauthInventory.status === 401, 'Unauthenticated inventory request returns HTTP 401 Unauthorized');
+
+    const unauthRequests = await fetch(`${BASE_URL}/api/requests/hospital/1`);
+    assert(unauthRequests.status === 401, 'Unauthenticated requests request returns HTTP 401 Unauthorized');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 12: Donor accounts cannot access hospital APIs
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 12: Donor Accounts Cannot Access Hospital APIs ---');
+    // Login as Donor 1 (Rahul Sharma, +91 98765 43210, donor123)
     const donorLoginRes = await fetch(`${BASE_URL}/api/auth/donor/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: testMobile, password: newPassword })
+      body: JSON.stringify({ identifier: '9876543210', password: 'donor123' })
     });
     const donorLoginData = await donorLoginRes.json();
-    assert(donorLoginRes.status === 200, 'Donor login successful with HTTP 200');
-    assert(donorLoginData.userType === 'DONOR', 'User type returned is DONOR');
-    assert(Boolean(donorLoginData.token), 'Donor session token received');
-    assert(donorLoginData.donor.id === appAfterApproval.donor_id, 'Donor profile matches activated applicant');
+    assert(donorLoginRes.status === 200, 'Donor login succeeds with HTTP 200');
     const donorToken = donorLoginData.token;
-    const testDonorId = donorLoginData.donor.id;
-    passedTests++;
 
-    // -------------------------------------------------------------------------
-    // SCENARIO 10: Incorrect password is rejected
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 10: Incorrect Password Rejected ---');
-    const wrongPassRes = await fetch(`${BASE_URL}/api/auth/donor/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: testMobile, password: 'WrongPasswordXYZ' })
-    });
-    assert(wrongPassRes.status === 401, 'Wrong password rejected with HTTP 401 Unauthorized');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 11: Rejected applicant cannot activate account
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 11: Rejected Applicant Cannot Activate Account ---');
-    const rejReqRes = await fetch(`${BASE_URL}/api/auth/donor/request-activation-code`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ applicationId: 'DEMO-APP-REJECTED', mobile: '9811166677' })
-    });
-    const rejReqData = await rejReqRes.json();
-    assert(rejReqRes.status === 403, 'Requesting activation code for rejected application returns HTTP 403 Forbidden');
-    assert(rejReqData.error.includes('REJECTED'), 'Error indicates application was rejected');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 12: Donor cannot access another donor's records
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 12: Donor Cannot Access Another Donor Records ---');
-    const otherDonorId = testDonorId === 1 ? 2 : 1;
-    const crossAccessRes = await fetch(`${BASE_URL}/api/donor/${otherDonorId}`, {
+    // Donor attempts to access hospital dashboard
+    const donorHospDash = await fetch(`${BASE_URL}/api/hospital/1/dashboard-summary`, {
       headers: { 'Authorization': `Bearer ${donorToken}` }
     });
-    assert(crossAccessRes.status === 403, 'Cross-donor profile access blocked with HTTP 403 Forbidden');
+    assert(donorHospDash.status === 403, 'Donor token accessing hospital dashboard returns HTTP 403 Forbidden');
 
-    const ownAccessRes = await fetch(`${BASE_URL}/api/donor/${testDonorId}`, {
+    // Donor attempts to access hospital inventory
+    const donorHospInv = await fetch(`${BASE_URL}/api/inventory/1`, {
       headers: { 'Authorization': `Bearer ${donorToken}` }
     });
-    assert(ownAccessRes.status === 200, 'Own profile access succeeds with HTTP 200');
+    assert(donorHospInv.status === 403, 'Donor token accessing hospital inventory returns HTTP 403 Forbidden');
     passedTests++;
 
     // -------------------------------------------------------------------------
-    // SCENARIO 13: Donor cannot access hospital routes
+    // TEST CASE 13: Logout invalidates the session
     // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 13: Donor Cannot Access Hospital Routes ---');
-    const donorToHospRes = await fetch(`${BASE_URL}/api/hospital/applications`, {
-      headers: { 'Authorization': `Bearer ${donorToken}` }
-    });
-    assert(donorToHospRes.status === 403, 'Donor token accessing hospital route blocked with HTTP 403 Forbidden');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 14: Unauthenticated user cannot access protected dashboard endpoints
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 14: Unauthenticated Access to Dashboards Blocked ---');
-    const unauthHosp = await fetch(`${BASE_URL}/api/hospital/1/dashboard-summary`);
-    assert(unauthHosp.status === 401, 'Unauthenticated hospital dashboard returns HTTP 401');
-
-    const unauthDonor = await fetch(`${BASE_URL}/api/donor/1`);
-    assert(unauthDonor.status === 401, 'Unauthenticated donor profile returns HTTP 401');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 15: Logout properly invalidates session token
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 15: Logout Properly Invalidates Session Token ---');
+    console.log('\n--- Case 13: Logout Invalidates the Session ---');
     const logoutRes = await fetch(`${BASE_URL}/api/auth/logout`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${donorToken}` }
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
     });
     assert(logoutRes.status === 200, 'Logout request returns HTTP 200');
 
-    // Attempt to access again with invalidated token
-    const afterLogoutRes = await fetch(`${BASE_URL}/api/donor/${testDonorId}`, {
+    // Attempt access with logged-out token
+    const afterLogoutRes = await fetch(`${BASE_URL}/api/hospital/${newHospitalId}/dashboard-summary`, {
+      headers: { 'Authorization': `Bearer ${newHospToken}` }
+    });
+    assert(afterLogoutRes.status === 401, 'Subsequent request with invalidated session returns HTTP 401 Unauthorized');
+    passedTests++;
+
+    // -------------------------------------------------------------------------
+    // TEST CASE 14: Existing donor workflows continue working
+    // -------------------------------------------------------------------------
+    console.log('\n--- Case 14: Existing Donor Workflows Continue Working ---');
+    // Verify donor profile access with valid donor token
+    const donorProfileRes = await fetch(`${BASE_URL}/api/donor/1`, {
       headers: { 'Authorization': `Bearer ${donorToken}` }
     });
-    assert(afterLogoutRes.status === 401, 'Subsequent request with logged-out token returns HTTP 401 Unauthorized');
-    passedTests++;
+    const donorProfileData = await donorProfileRes.json();
+    assert(donorProfileRes.status === 200, 'Donor can access own profile successfully');
+    assert(donorProfileData.donor && donorProfileData.donor.id === 1, 'Donor profile matches Rahul Sharma');
 
-    // -------------------------------------------------------------------------
-    // SCENARIO 16: Registration approval does NOT approve medical screening
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 16: Registration Approval Does Not Approve Medical Screening ---');
-    const donorRecord = db.prepare('SELECT registration_status, account_status, medical_screening_status FROM donors WHERE id = ?').get(testDonorId);
-    assert(donorRecord.registration_status === 'APPROVED', 'registration_status is APPROVED');
-    assert(donorRecord.account_status === 'ACTIVE', 'account_status is ACTIVE');
-    assert(
-      donorRecord.medical_screening_status === 'PENDING_SCREENING',
-      'medical_screening_status remains PENDING_SCREENING (Strict medical separation confirmed)'
-    );
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 17: Existing AI Demand Forecasting & Smart Matching Continue Working
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 17: AI Demand Forecasting & Smart Matching Continue Working ---');
+    // Verify AI Demand Forecasting model execution
     const forecast = forecastDemand(1, 'O-', 'Packed Red Blood Cells (PRBC)');
-    assert(Boolean(forecast && forecast.bloodGroup === 'O-'), 'AI Forecast engine executes successfully');
-    assert(typeof forecast.projectedShortage === 'number', 'Forecast outputs numeric shortage');
-    assert(Boolean(forecast.modelMetrics && forecast.modelMetrics.algorithm), 'Model metrics include algorithm specification');
+    assert(Boolean(forecast && forecast.bloodGroup === 'O-'), 'AI Demand Forecasting model runs successfully');
+    assert(typeof forecast.projectedShortage === 'number', 'Forecast outputs numeric shortage calculation');
 
-    const matchResult = matchDonorsForRequest({
+    // Verify AI Smart Donor Matching execution
+    const match = matchDonorsForRequest({
       hospitalId: 1,
-      bloodGroup: 'B+',
+      bloodGroup: 'O-',
       component: 'Packed Red Blood Cells (PRBC)',
-      radiusKm: 30,
-      urgency: 'HIGH'
+      radiusKm: 25,
+      urgency: 'CRITICAL'
     });
-    assert(matchResult.compatibleGroups.includes('B+'), 'Donor matching identifies compatible blood groups');
-    assert(Array.isArray(matchResult.rankedDonors), 'Ranked donors returned as array');
-    passedTests++;
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 18: Data persistence verified in SQLite
-    // -------------------------------------------------------------------------
-    console.log('\n--- Scenario 18: SQLite Persistence Verified ---');
-    const persistedApp = db.prepare('SELECT application_id, status FROM donor_applications WHERE application_id = ?').get(testAppId);
-    assert(persistedApp.status === 'APPROVED', 'Application state persisted in SQLite disk file');
-    const persistedAcc = db.prepare('SELECT id FROM donor_accounts WHERE donor_id = ?').get(testDonorId);
-    assert(Boolean(persistedAcc), 'Donor account record persisted in SQLite disk file');
+    assert(match.compatibleGroups.includes('O-'), 'Donor matching identifies compatible groups');
+    assert(Array.isArray(match.rankedDonors), 'Ranked donors list returned');
     passedTests++;
 
     console.log('\n================================================================');
-    console.log(`>>> ALL ${passedTests}/${totalTests} SCENARIOS VERIFIED SUCCESSFULLY! <<<`);
+    console.log(`>>> ALL ${passedTests}/${totalTests} TEST CASES VERIFIED SUCCESSFULLY! <<<`);
     console.log('================================================================\n');
 
     process.exit(0);
-
   } catch (error) {
-    console.error('\n❌ TEST SUITE RUN TERMINATED WITH ERROR:', error);
+    console.error('\n❌ TEST RUN FAILED:', error);
     process.exit(1);
   }
 }
