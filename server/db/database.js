@@ -238,6 +238,19 @@ function initSchema() {
       role TEXT DEFAULT 'SUPER_ADMIN',
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS sms_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      donor_id INTEGER,
+      application_id INTEGER,
+      recipient TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'APPOINTMENT',
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL,
+      response_data TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // Run schema migration checks for columns that might be missing in existing database files

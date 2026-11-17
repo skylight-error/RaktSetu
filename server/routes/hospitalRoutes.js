@@ -10,6 +10,7 @@ const {
 } = require('../services/excelService');
 const { generateActivationOtp } = require('../utils/crypto');
 const { requireHospital } = require('../middleware/auth');
+const { sendSMS, formatAppointmentSMS, getRecentSMSLogs } = require('../services/smsService');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -439,11 +440,47 @@ router.post('/donors', requireHospital, (req, res) => {
 /**
  * Schedule screening appointment (Workflow 5 Stage 2 & Requirement 10)
  * Protected: requires hospital authentication
+ * Dispatches live/simulated SMS via Fast2SMS/MSG91 to the donor/applicant mobile.
  */
-router.post('/schedule-screening', requireHospital, (req, res) => {
-  const { donorId, hospitalId, appointmentDate, appointmentTime, instructions } = req.body;
-  if (!donorId || !appointmentDate || !appointmentTime) {
-    return res.status(400).json({ error: 'Donor ID, appointment date, and time are required.' });
+router.post('/schedule-screening', requireHospital, async (req, res) => {
+  const { donorId, applicationId, hospitalId, appointmentDate, appointmentTime, instructions } = req.body;
+
+  let targetDonorId = donorId ? Number(donorId) : null;
+  let targetApp = null;
+
+  // Support scheduling by either donorId or applicationId
+  if (!targetDonorId && applicationId) {
+    targetApp = db.prepare('SELECT * FROM donor_applications WHERE id = ? OR application_id = ?').get(applicationId, applicationId);
+    if (targetApp) {
+      if (targetApp.donor_id) {
+        targetDonorId = targetApp.donor_id;
+      } else {
+        const donorRow = db.prepare('SELECT id FROM donors WHERE application_id = ?').get(targetApp.id);
+        if (donorRow) {
+          targetDonorId = donorRow.id;
+        } else {
+          const insertD = db.prepare(`
+            INSERT INTO donors (
+              full_name, dob, age, gender, blood_group, mobile, email,
+              address, city, pincode, preferred_hospital_id, registration_status,
+              account_status, medical_screening_status, screening_status,
+              weekly_availability, consent_contact, application_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', 'NOT_ACTIVATED', 'APPOINTMENT_SCHEDULED', 'APPOINTMENT SCHEDULED', 'AVAILABLE', 1, ?)
+          `).run(
+            targetApp.full_name, targetApp.dob, targetApp.age || 25, targetApp.gender || 'O',
+            targetApp.blood_group, targetApp.mobile, targetApp.email, targetApp.address,
+            targetApp.city, targetApp.pincode, targetApp.preferred_hospital_id || req.hospital.id,
+            targetApp.id
+          );
+          targetDonorId = insertD.lastInsertRowid;
+          db.prepare("UPDATE donor_applications SET status = 'APPROVED', donor_id = ? WHERE id = ?").run(targetDonorId, targetApp.id);
+        }
+      }
+    }
+  }
+
+  if (!targetDonorId || !appointmentDate || !appointmentTime) {
+    return res.status(400).json({ error: 'Donor ID (or Application ID), appointment date, and time are required.' });
   }
 
   const hId = hospitalId || req.hospital.id;
@@ -453,7 +490,7 @@ router.post('/schedule-screening', requireHospital, (req, res) => {
     INSERT INTO appointments (donor_id, hospital_id, appointment_date, appointment_time, status, instructions)
     VALUES (?, ?, ?, ?, 'SCHEDULED', ?)
   `);
-  insertAppt.run(donorId, hId, appointmentDate, appointmentTime, instructions || 'Standard blood donor medical screening.');
+  insertAppt.run(targetDonorId, hId, appointmentDate, appointmentTime, instructions || 'Standard blood donor medical screening.');
 
   // 2. Update donor status to APPOINTMENT SCHEDULED
   db.prepare(`
@@ -461,25 +498,58 @@ router.post('/schedule-screening', requireHospital, (req, res) => {
     SET screening_status = 'APPOINTMENT SCHEDULED',
         medical_screening_status = 'APPOINTMENT_SCHEDULED'
     WHERE id = ?
-  `).run(donorId);
+  `).run(targetDonorId);
 
-  // 3. Notify donor
-  const hospital = db.prepare('SELECT name FROM hospitals WHERE id = ?').get(hId);
+  // 3. Hospital & Donor details
+  const hospital = db.prepare('SELECT name, phone, address FROM hospitals WHERE id = ?').get(hId);
+  const updatedDonor = db.prepare('SELECT * FROM donors WHERE id = ?').get(targetDonorId);
+
+  // 4. In-App Notification
   db.prepare(`
     INSERT INTO notifications (donor_id, title, message, type)
     VALUES (?, 'Screening Appointment Scheduled 🗓️', ?, 'SCREENING_UPDATE')
   `).run(
-    donorId,
+    targetDonorId,
     `Your medical donor screening is scheduled at ${hospital ? hospital.name : 'Blood Centre'} on ${appointmentDate} at ${appointmentTime}. ${instructions || ''}`
   );
 
-  const updatedDonor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId);
+  // 5. Dispatch SMS Notification via Fast2SMS / MSG91
+  let smsResult = null;
+  if (updatedDonor && updatedDonor.mobile) {
+    const smsMessage = formatAppointmentSMS({
+      donorName: updatedDonor.full_name,
+      hospitalName: hospital ? hospital.name : 'Blood Centre',
+      date: appointmentDate,
+      time: appointmentTime,
+      instructions: instructions || 'Standard blood donor medical screening.',
+      hospitalPhone: hospital ? hospital.phone : null,
+      hospitalAddress: hospital ? hospital.address : null
+    });
+
+    smsResult = await sendSMS({
+      to: updatedDonor.mobile,
+      message: smsMessage,
+      type: 'APPOINTMENT_SCHEDULED',
+      donorId: updatedDonor.id,
+      applicationId: updatedDonor.application_id || (targetApp ? targetApp.id : null)
+    });
+  }
 
   res.json({
     success: true,
     donor: updatedDonor,
-    message: 'Screening appointment confirmed and reflected on donor portal.'
+    sms: smsResult,
+    message: smsResult && smsResult.success
+      ? `Appointment scheduled & SMS dispatched to ${updatedDonor.mobile}!`
+      : 'Screening appointment confirmed and reflected on donor portal.'
   });
+});
+
+/**
+ * Get recent SMS logs (Protected: hospital staff audit)
+ */
+router.get('/sms-logs', requireHospital, (req, res) => {
+  res.json({ logs: getRecentSMSLogs(30) });
 });
 
 /**

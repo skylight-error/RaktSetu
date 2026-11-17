@@ -1648,6 +1648,11 @@ function renderHospitalApplicationsView(container, apps) {
                       ✓ Approved by ${a.reviewed_by_staff_name || 'Staff'}<br/>
                       <span style="color:var(--text-muted);">${a.reviewed_at ? a.reviewed_at.slice(0, 10) : ''}</span>
                     </div>
+                    <div style="margin-top:6px;">
+                      <button class="btn btn-secondary btn-sm" style="font-size:11px; padding:3px 8px; color:var(--navy-dark);" onclick="openScheduleScreeningForApplicant(${a.id}, '${a.full_name}')" title="Schedule appointment & send SMS">
+                        ${Icons.calendar(12)} Schedule & SMS
+                      </button>
+                    </div>
                   ` : `
                     <div style="font-size:11px; color:var(--status-red);">
                       ✕ Rejected: ${a.rejection_reason || 'Criteria not met'}<br/>
@@ -2435,8 +2440,13 @@ function renderDonorDashboardContent(container, data) {
                   <strong style="font-size:13px;">${a.hospital_name}</strong>
                   <span class="status-badge ${a.status === 'COMPLETED' ? 'status-approved' : 'status-pending'}">${a.status}</span>
                 </div>
-                <div style="font-size:12px; color:var(--primary-red); font-weight:700; margin-top:4px;">
-                  ${a.appointment_date} at ${a.appointment_time}
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+                  <div style="font-size:12px; color:var(--primary-red); font-weight:700;">
+                    ${a.appointment_date} at ${a.appointment_time}
+                  </div>
+                  <span style="font-size:10px; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; padding:2px 6px; border-radius:4px; font-weight:600;">
+                    📱 SMS Confirmed
+                  </span>
                 </div>
                 ${a.instructions ? `
                   <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
@@ -2792,7 +2802,7 @@ async function downloadImportErrorReport() {
 }
 
 // Screening Schedule & Decision Modals
-function openScheduleScreeningModal(donorId, donorName) {
+function openScheduleScreeningModal(donorId, donorName, applicationId = null) {
   const container = document.getElementById('modalContainer');
   if (!container) return;
 
@@ -2805,10 +2815,17 @@ function openScheduleScreeningModal(donorId, donorName) {
           </h3>
           <button style="border:none; background:none; cursor:pointer;" onclick="closeModal()">✕</button>
         </div>
-        <form onsubmit="handleScheduleScreeningSubmit(event, ${donorId})">
+        <form onsubmit="handleScheduleScreeningSubmit(event, ${donorId || 'null'}, ${applicationId ? `'${applicationId}'` : 'null'})">
           <div class="modal-body">
-            <div style="font-size:13px; margin-bottom:16px;">
+            <div style="font-size:13px; margin-bottom:12px;">
               Scheduling medical checkup for: <strong>${donorName}</strong>
+            </div>
+
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:16px; font-size:12px; color:#166534; display:flex; align-items:flex-start; gap:8px;">
+              <span style="font-size:14px; line-height:1;">📱</span>
+              <div>
+                <strong>SMS Dispatch Guaranteed:</strong> An official SMS notification containing the appointment date, time, hospital address, and preparation instructions will be automatically dispatched to the donor's mobile number via Fast2SMS / MSG91.
+              </div>
             </div>
 
             <div class="form-grid-2">
@@ -2829,7 +2846,7 @@ function openScheduleScreeningModal(donorId, donorName) {
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Confirm Appointment</button>
+            <button type="submit" class="btn btn-primary">Confirm & Send SMS</button>
           </div>
         </form>
       </div>
@@ -2837,11 +2854,16 @@ function openScheduleScreeningModal(donorId, donorName) {
   `;
 }
 
-async function handleScheduleScreeningSubmit(e, donorId) {
+function openScheduleScreeningForApplicant(appId, applicantName) {
+  openScheduleScreeningModal(null, applicantName, appId);
+}
+
+async function handleScheduleScreeningSubmit(e, donorId, applicationId) {
   e.preventDefault();
   const formData = new FormData(e.target);
   const payload = {
-    donorId,
+    donorId: donorId || undefined,
+    applicationId: applicationId || undefined,
     hospitalId: AppState.activeHospital ? AppState.activeHospital.id : 1,
     appointmentDate: formData.get('appointmentDate'),
     appointmentTime: formData.get('appointmentTime'),
